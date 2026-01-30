@@ -1,5 +1,3 @@
-: fib ( n -- fib )
-  dup 2 < if exit then
-  dup 1- recurse swap 2 - recurse + ;
-
-: main 35 fib . cr ;
+\ fib.fs - Iterative fibonacci
+: fib ( n -- f ) 0 1 rot 0 do tuck+ loop drop ;
+: main ( -- ) 35 fib . cr ;

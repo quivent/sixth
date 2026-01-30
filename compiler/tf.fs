@@ -45,6 +45,14 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 \ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
 variable stack-depth  0 stack-depth !
 
+\ Dead code elimination: track purity and stack effect
+variable has-io       0 has-io !        \ does current word have I/O?
+variable start-depth  0 start-depth !   \ stack depth at word entry
+
+\ Pending call elimination
+variable pending-call   0 pending-call !   \ address of pending call, 0=none
+variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
+
 \ ============================================================
 \ CODE EMISSION
 \ ============================================================
@@ -271,40 +279,31 @@ variable stack-depth  0 stack-depth !
   pop-nos ;
 
 : gen-sub ( -- )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8
+  \ ( a b -- a-b ) where rax=b, rbx=a
   $48 c, $29 c, $c3 c,           \ sub rbx, rax
-  $48 c, $89 c, $d8 c, ;         \ mov rax, rbx
+  $48 c, $89 c, $d8 c,           \ mov rax, rbx
+  pop-nos ;
 
 : gen-mul ( -- )
-  $49 c, $0f c, $af c, $07 c,    \ imul rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $0f c, $af c, $c3 c,    \ imul rax, rbx
+  pop-nos ;
 
 : gen-div ( -- )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8
-  $48 c, $92 c,                  \ xchg rax, rdx
-  $48 c, $89 c, $d8 c,           \ mov rax, rbx
-  $48 c, $99 c,                  \ cqo
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]... wait, already popped
-  \ Redo: a/b where b is TOS
-  ;
-
-\ Simpler div: ( a b -- a/b )
-: gen-div ( -- )
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax       ; divisor
-  $49 c, $8b c, $07 c,           \ mov rax, [r15]     ; dividend
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8
-  $48 c, $99 c,                  \ cqo
-  $48 c, $f7 c, $f9 c, ;         \ idiv rcx
-
-: gen-mod ( -- )
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax
-  $49 c, $8b c, $07 c,           \ mov rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8
+  \ ( a b -- a/b ) where rax=b (divisor), rbx=a (dividend)
+  $48 c, $89 c, $c1 c,           \ mov rcx, rax       ; divisor = b
+  $48 c, $89 c, $d8 c,           \ mov rax, rbx       ; dividend = a
   $48 c, $99 c,                  \ cqo
   $48 c, $f7 c, $f9 c,           \ idiv rcx
-  $48 c, $89 c, $d0 c, ;         \ mov rax, rdx
+  pop-nos ;
+
+: gen-mod ( -- )
+  \ ( a b -- a mod b ) where rax=b (divisor), rbx=a (dividend)
+  $48 c, $89 c, $c1 c,           \ mov rcx, rax       ; divisor = b
+  $48 c, $89 c, $d8 c,           \ mov rax, rbx       ; dividend = a
+  $48 c, $99 c,                  \ cqo
+  $48 c, $f7 c, $f9 c,           \ idiv rcx
+  $48 c, $89 c, $d0 c,           \ mov rax, rdx       ; result = remainder
+  pop-nos ;
 
 : gen-negate ( -- )
   $48 c, $f7 c, $d8 c, ;         \ neg rax
@@ -321,17 +320,21 @@ variable stack-depth  0 stack-depth !
 : gen-2- ( -- )
   $48 c, $83 c, $e8 c, 2 c, ;    \ sub rax, 2
 
+: gen-tuck+ ( -- )
+  \ ( a b -- b a+b ) One instruction: xadd rax, rbx
+  $48 c, $0f c, $c1 c, $d8 c, ;  \ xadd rax, rbx
+
 : gen-and ( -- )
-  $49 c, $23 c, $07 c,           \ and rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $21 c, $d8 c,           \ and rax, rbx
+  pop-nos ;
 
 : gen-or ( -- )
-  $49 c, $0b c, $07 c,           \ or rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $09 c, $d8 c,           \ or rax, rbx
+  pop-nos ;
 
 : gen-xor ( -- )
-  $49 c, $33 c, $07 c,           \ xor rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $31 c, $d8 c,           \ xor rax, rbx
+  pop-nos ;
 
 : gen-invert ( -- )
   $48 c, $f7 c, $d0 c, ;         \ not rax
@@ -341,9 +344,9 @@ variable stack-depth  0 stack-depth !
 \ ============================================================
 
 : gen-cmp-setup ( -- )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8
-  $48 c, $39 c, $c3 c, ;         \ cmp rbx, rax
+  \ NOS already in rbx, TOS in rax
+  $48 c, $39 c, $c3 c,           \ cmp rbx, rax
+  pop-nos ;
 
 : gen-= ( -- )
   gen-cmp-setup
@@ -419,12 +422,11 @@ variable stack-depth  0 stack-depth !
 
 : gen-if ( -- orig )
   \ TOS is condition; test and consume it, branch if zero
-  \ Save condition result before pop (pop clobbers flags)
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $94 c, $c1 c,           \ setz cl (save result)
+  \ Save to rdi (pop-tos doesn't touch it)
+  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save TOS)
   pop-tos                        \ load new TOS (consumes condition)
-  $84 c, $c9 c,                  \ test cl, cl
-  $0f c, $85 c,                  \ jnz rel32 (jump if was zero)
+  $48 c, $85 c, $ff c,           \ test rdi, rdi
+  $0f c, $84 c,                  \ jz rel32 (jump if was zero)
   0 d,                           \ placeholder
   code-here ;                    \ leave address for patching (after rel32)
 
@@ -477,10 +479,14 @@ variable stack-depth  0 stack-depth !
   code-here ;
 
 : gen-else ( orig1 -- orig2 )
+  \ Emit jmp to skip else clause (for when true branch taken)
   $e9 c,                         \ jmp rel32
-  code-here 0 d,
-  code-here swap                      \ ( new-orig old-orig )
-  code-here swap 4 - patch-rel32 ;    \ patch old jump to code-here
+  0 d,                           \ placeholder
+  code-here                      \ ( orig1 new-orig ) where new-orig = after placeholder
+  \ Patch if's jz to jump here (start of else clause)
+  tuck                           \ ( new-orig orig1 new-orig )
+  swap 4 -                       \ ( new-orig new-orig orig1-4 )
+  patch-rel32 ;                  \ ( new-orig )
 
 : gen-then ( orig -- )
   code-here swap 4 - patch-rel32 ;    \ patch jump to code-here
@@ -489,10 +495,10 @@ variable stack-depth  0 stack-depth !
   code-here ;
 
 : gen-until ( dest -- )
-  \ Save condition, pop new TOS, then test (pop clobbers flags)
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax (save condition)
+  \ Save condition to rdi, pop new TOS, then test
+  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save condition)
   pop-tos                         \ get new TOS into rax
-  $48 c, $85 c, $c9 c,           \ test rcx, rcx
+  $48 c, $85 c, $ff c,           \ test rdi, rdi
   $0f c, $84 c,                  \ jz rel32
   code-here 4 + - d, ;
 
@@ -521,10 +527,10 @@ variable stack-depth  0 stack-depth !
   code-here 4 + - d, ;
 
 : gen-while ( dest -- orig dest )
-  \ Save condition, pop new TOS, then test (pop clobbers flags)
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax (save condition)
+  \ Save condition to rdi, pop new TOS, then test
+  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save condition)
   pop-tos                         \ get new TOS into rax
-  $48 c, $85 c, $c9 c,           \ test rcx, rcx
+  $48 c, $85 c, $ff c,           \ test rdi, rdi
   $0f c, $84 c,                  \ jz rel32
   0 d,
   code-here swap ;
@@ -646,10 +652,10 @@ variable start-jmp  \ Address of jump-to-start placeholder
 \ ============================================================
 
 : gen-dot ( -- )
+  1 has-io !
   stack-depth @ 3 >= if
     $51 c,                       \ push rcx (save third stack element)
   then
-  $b9 c, 10 d,                   \ mov ecx, 10
   $45 c, $31 c, $c0 c,           \ xor r8d, r8d
   \ Check for negative
   $48 c, $85 c, $c0 c,           \ test rax, rax
@@ -664,7 +670,8 @@ variable start-jmp  \ Address of jump-to-start placeholder
   $58 c,                         \ pop (minus sign)
   $58 c,                         \ pop rax
   $48 c, $f7 c, $d8 c,           \ neg rax
-  \ digit_loop:
+  \ digit_loop: (jns lands here too)
+  $b9 c, 10 d,                   \ mov ecx, 10 (AFTER syscall - syscall clobbers rcx)
   $31 c, $d2 c,                  \ xor edx, edx
   $f7 c, $f1 c,                  \ div ecx
   $83 c, $c2 c, $30 c,           \ add edx, '0'
@@ -695,6 +702,7 @@ variable start-jmp  \ Address of jump-to-start placeholder
   pop-tos ;
 
 : gen-cr ( -- )
+  1 has-io !
   $50 c,                         \ push rax  (save TOS)
   $6a c, 10 c,                   \ push 10
   $b8 c, 1 d,                    \ mov eax, 1  (write)
@@ -706,6 +714,7 @@ variable start-jmp  \ Address of jump-to-start placeholder
   $58 c, ;                       \ pop rax  (restore TOS)
 
 : gen-emit ( -- )
+  1 has-io !
   push-tos                       \ save for later pop
   $50 c,                         \ push rax (char)
   $b8 c, 1 d,                    \ mov eax, 1
@@ -773,6 +782,7 @@ s" 1+" s, 2constant $1+
 s" 1-" s, 2constant $1-
 s" 2+" s, 2constant $2+
 s" 2-" s, 2constant $2-
+s" tuck+" s, 2constant $tuck+
 s" and" s, 2constant $and
 s" or" s, 2constant $or
 s" xor" s, 2constant $xor
@@ -952,8 +962,18 @@ variable num-neg
   \ Can't store execution tokens this way - need different approach
   ;
 
+\ Emit a pending call (when result is used) then clear
+: flush-pending ( -- )
+  pending-call @ ?dup if gen-call then
+  0 pending-call ! ;
+
+\ Discard pending call without emitting (result unused)
+: discard-pending ( -- )
+  0 pending-call ! ;
+
 \ Alternative: check each word directly using static strings
 : compile-builtin ( addr u -- found? )
+  \ Only flush before ops that consume TOS - not push-only ops
   2dup $dup str= if 2drop gen-dup true exit then
   2dup $dup2 str= if 2drop gen-dup2 true exit then
   2dup $drop str= if 2drop gen-drop true exit then
@@ -964,54 +984,55 @@ variable num-neg
   2dup $tuck str= if 2drop gen-tuck true exit then
   2dup $2dup str= if 2drop gen-2dup true exit then
   2dup $2drop str= if 2drop gen-2drop true exit then
-  2dup $+ str= if 2drop gen-add true exit then
-  2dup $- str= if 2drop gen-sub true exit then
-  2dup $* str= if 2drop gen-mul true exit then
-  2dup $/ str= if 2drop gen-div true exit then
-  2dup $mod str= if 2drop gen-mod true exit then
+  2dup $+ str= if 2drop flush-pending gen-add true exit then
+  2dup $- str= if 2drop flush-pending gen-sub true exit then
+  2dup $* str= if 2drop flush-pending gen-mul true exit then
+  2dup $/ str= if 2drop flush-pending gen-div true exit then
+  2dup $mod str= if 2drop flush-pending gen-mod true exit then
   2dup $negate str= if 2drop gen-negate true exit then
   2dup $1+ str= if 2drop gen-1+ true exit then
   2dup $1- str= if 2drop gen-1- true exit then
   2dup $2+ str= if 2drop gen-2+ true exit then
   2dup $2- str= if 2drop gen-2- true exit then
-  2dup $and str= if 2drop gen-and true exit then
-  2dup $or str= if 2drop gen-or true exit then
-  2dup $xor str= if 2drop gen-xor true exit then
+  2dup $tuck+ str= if 2drop gen-tuck+ true exit then
+  2dup $and str= if 2drop flush-pending gen-and true exit then
+  2dup $or str= if 2drop flush-pending gen-or true exit then
+  2dup $xor str= if 2drop flush-pending gen-xor true exit then
   2dup $invert str= if 2drop gen-invert true exit then
-  2dup $= str= if 2drop gen-= true exit then
-  2dup $<> str= if 2drop gen-<> true exit then
-  2dup $< str= if 2drop gen-< true exit then
-  2dup $> str= if 2drop gen-> true exit then
-  2dup $<= str= if 2drop gen-<= true exit then
-  2dup $>= str= if 2drop gen->= true exit then
-  2dup $0= str= if 2drop gen-0= true exit then
-  2dup $0< str= if 2drop gen-0< true exit then
+  2dup $= str= if 2drop flush-pending gen-= true exit then
+  2dup $<> str= if 2drop flush-pending gen-<> true exit then
+  2dup $< str= if 2drop flush-pending gen-< true exit then
+  2dup $> str= if 2drop flush-pending gen-> true exit then
+  2dup $<= str= if 2drop flush-pending gen-<= true exit then
+  2dup $>= str= if 2drop flush-pending gen->= true exit then
+  2dup $0= str= if 2drop flush-pending gen-0= true exit then
+  2dup $0< str= if 2drop flush-pending gen-0< true exit then
   2dup $@ str= if 2drop gen-@ true exit then
-  2dup $! str= if 2drop gen-! true exit then
+  2dup $! str= if 2drop flush-pending gen-! true exit then
   2dup $c@ str= if 2drop gen-c@ true exit then
-  2dup $c! str= if 2drop gen-c! true exit then
-  2dup $. str= if 2drop gen-dot true exit then
+  2dup $c! str= if 2drop flush-pending gen-c! true exit then
+  2dup $. str= if 2drop flush-pending gen-dot true exit then
   2dup $cr str= if 2drop gen-cr true exit then
-  2dup $emit str= if 2drop gen-emit true exit then
-  2dup $if str= if 2drop gen-if cf-push true exit then
-  2dup $<if str= if 2drop gen-<if cf-push true exit then
-  2dup $>if str= if 2drop gen->if cf-push true exit then
-  2dup $=if str= if 2drop gen-=if cf-push true exit then
-  2dup $0<if str= if 2drop gen-0<if cf-push true exit then
-  2dup $0=if str= if 2drop gen-0=if cf-push true exit then
+  2dup $emit str= if 2drop flush-pending gen-emit true exit then
+  2dup $if str= if 2drop flush-pending gen-if cf-push true exit then
+  2dup $<if str= if 2drop flush-pending gen-<if cf-push true exit then
+  2dup $>if str= if 2drop flush-pending gen->if cf-push true exit then
+  2dup $=if str= if 2drop flush-pending gen-=if cf-push true exit then
+  2dup $0<if str= if 2drop flush-pending gen-0<if cf-push true exit then
+  2dup $0=if str= if 2drop flush-pending gen-0=if cf-push true exit then
   2dup $else str= if 2drop cf-pop gen-else cf-push true exit then
   2dup $then str= if 2drop cf-pop gen-then true exit then
   2dup $begin str= if 2drop gen-begin cf-push true exit then
-  2dup $until str= if 2drop cf-pop gen-until true exit then
-  2dup $0=until str= if 2drop cf-pop gen-0=until true exit then
-  2dup $nzloop str= if 2drop cf-pop gen-nzloop true exit then
-  2dup $1-nzloop str= if 2drop cf-pop gen-1-nzloop true exit then
-  2dup $while str= if 2drop cf-pop gen-while cf-push cf-push true exit then
+  2dup $until str= if 2drop flush-pending cf-pop gen-until true exit then
+  2dup $0=until str= if 2drop flush-pending cf-pop gen-0=until true exit then
+  2dup $nzloop str= if 2drop flush-pending cf-pop gen-nzloop true exit then
+  2dup $1-nzloop str= if 2drop flush-pending cf-pop gen-1-nzloop true exit then
+  2dup $while str= if 2drop flush-pending cf-pop gen-while cf-push cf-push true exit then
   2dup $repeat str= if 2drop cf-pop cf-pop gen-repeat true exit then
   2dup $again str= if 2drop cf-pop gen-again true exit then
-  2dup $do str= if 2drop gen-do cf-push true exit then
+  2dup $do str= if 2drop flush-pending gen-do cf-push true exit then
   2dup $loop str= if 2drop cf-pop gen-loop true exit then
-  2dup $+loop str= if 2drop cf-pop gen-+loop true exit then
+  2dup $+loop str= if 2drop flush-pending cf-pop gen-+loop true exit then
   2dup $i str= if 2drop gen-i true exit then
   2dup $j str= if 2drop gen-j true exit then
   2dup $recurse str= if 2drop gen-recurse true exit then
@@ -1035,20 +1056,84 @@ variable current-def  0 current-def !
   then
   \ Try as user word
   2dup dict-find ?dup if
-    nip nip dict-addr @ gen-call exit
+    nip nip
+    dup dict-flags @              \ get flags
+    dup 2 and 0=                  \ pure? (no I/O)
+    swap 4 and 0= and if          \ and void? (no return)
+      drop exit                   \ eliminate the call entirely
+    then
+    dict-addr @ gen-call exit
   then
   \ Unknown word
   ." Unknown word: " type cr
   1 throw ;
 
+variable is-void  0 is-void !   \ set by ( -- ) comment
+
+: skip-ws-only ( -- )
+  \ Skip whitespace without skipping comments
+  begin
+    input-pos @ input-len @ >= if exit then
+    input-buf input-pos @ + c@ dup 32 <= swap 0 > and if
+      1 input-pos +!
+    else exit then
+  again ;
+
+: parse-stack-comment ( -- )
+  \ Peek at raw input to find ( ... -- ... ) pattern
+  \ get-token would skip it as a comment!
+  skip-ws-only
+  input-pos @ input-len @ >= if exit then
+  input-buf input-pos @ + c@ [char] ( <> if exit then
+  \ Check if ( is followed by whitespace (stack comment) or not (word like "(foo")
+  input-pos @ 1+ input-len @ >= if exit then
+  input-buf input-pos @ 1+ + c@ 32 > if exit then
+  \ It's a stack comment - parse it manually
+  1 input-pos +!                 \ skip (
+  1 is-void !                    \ assume void
+  0 >r                           \ r: saw-dashdash
+  begin
+    skip-ws-only
+    input-pos @ input-len @ >= if r> drop exit then
+    input-buf input-pos @ + c@
+    dup [char] ) = if drop r> drop 1 input-pos +! exit then
+    dup [char] - = if
+      input-pos @ 1+ input-len @ < if
+        input-buf input-pos @ 1+ + c@ [char] - = if
+          drop 2 input-pos +! r> drop 1 >r
+        else
+          \ Single -, it's a stack item
+          begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
+          r> if 0 is-void ! 1 >r else 1 >r then
+        then
+      else
+        begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
+        r> if 0 is-void ! 1 >r else 1 >r then
+      then
+    else
+      drop
+      \ Skip token
+      begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
+      r> if 0 is-void ! 1 >r else 1 >r then
+    then
+  again ;
+
 : start-def ( addr u -- )
   dict-add
   code-here current-word-addr !
-  1 stack-depth !              \ assume at least 1 argument (conservative)
+  0 has-io !
+  1 is-void !                  \ default void, stack comment overrides
+  parse-stack-comment
+  1 stack-depth !
+  stack-depth @ start-depth !
   1 state ! ;
 
 : end-def ( -- )
   gen-ret
+  \ Store flags: bit1=has-io, bit2=has-return
+  has-io @ 1 lshift                         \ bit 1 = has-io
+  is-void @ 0= if 4 or then                 \ bit 2 = has return (not void)
+  dict-buf dict-count @ 1- 32 * + dict-flags !
   0 state ! ;
 
 : compile-word ( addr u -- )

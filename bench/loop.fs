@@ -1,1 +1,2 @@
-: main 100000000 begin 1- dup 0= until drop ;
+\ loop.fs - Tight countdown (100M iterations)
+: main ( -- ) 100000000 begin 1-nzloop . cr ;
