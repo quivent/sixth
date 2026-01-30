@@ -123,6 +123,10 @@ struct vm {
     /* Require tracking (prevent double-load) */
     char        *loaded_files[256];
     int          loaded_count;
+
+    /* Command line arguments */
+    int          argc;
+    char       **argv;
 };
 
 /* === Inline Stack Operations === */

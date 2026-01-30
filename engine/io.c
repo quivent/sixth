@@ -8,6 +8,8 @@
 #include <limits.h>
 #include <libgen.h>
 #include <unistd.h>
+#include <time.h>
+#include <sys/wait.h>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>

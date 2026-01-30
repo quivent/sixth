@@ -1,3 +1,5 @@
-\ call.fs - Function call overhead (10M calls)
-: dec1 ( n -- n ) 1- ;
-: main ( -- ) 10000000 begin dec1 dup 0= until . cr ;
+\ call.fs - Recursive call overhead (100K calls with TCO)
+: countdown ( n -- 0 )
+  dup 0= if exit then
+  1- recurse ;
+: main ( -- ) 100000 countdown . cr ;

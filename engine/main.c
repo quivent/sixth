@@ -53,6 +53,10 @@ static void load_boot(vm_t *vm, const char *argv0) {
 int main(int argc, char **argv) {
     vm_t *vm = vm_create();
 
+    /* Store command line arguments for Forth access */
+    vm->argc = argc;
+    vm->argv = argv;
+
     /* Load bootstrap */
     load_boot(vm, argv[0]);
 
@@ -63,6 +67,9 @@ int main(int argc, char **argv) {
             i++;
             vm_interpret_line(vm, argv[i]);
             interactive = false;
+        } else if (strcmp(argv[i], "--") == 0) {
+            /* Stop processing files, remaining args available via argc/argv */
+            break;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Fifth - A minimal Forth engine\n");
             printf("Usage: fifth [file.fs ...] [-e \"code\"]\n");
