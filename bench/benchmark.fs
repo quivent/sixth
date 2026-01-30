@@ -8,7 +8,7 @@
 \ Fibonacci - tests recursion (optimized with <if)
 : fib ( n -- n )
   dup 2 <if exit then
-  dup 1- recurse swap 2 - recurse + ;
+  dup 1- recurse swap 2- recurse + ;
 
 : bench-fib ( -- )
   35 fib . cr ;

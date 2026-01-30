@@ -173,6 +173,12 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 : gen-dup ( -- )
   push-tos ;
 
+: gen-dup2 ( -- )
+  \ ( a -- a a a ) Two dups in one, saves 3 bytes
+  $49 c, $83 c, $ef c, 16 c,      \ sub r15, 16
+  $49 c, $89 c, $07 c,            \ mov [r15], rax
+  $49 c, $89 c, $47 c, 8 c, ;     \ mov [r15+8], rax
+
 : gen-drop ( -- )
   pop-tos ;
 
@@ -266,6 +272,12 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 
 : gen-1- ( -- )
   $48 c, $ff c, $c8 c, ;         \ dec rax
+
+: gen-2+ ( -- )
+  $48 c, $83 c, $c0 c, 2 c, ;    \ add rax, 2
+
+: gen-2- ( -- )
+  $48 c, $83 c, $e8 c, 2 c, ;    \ sub rax, 2
 
 : gen-and ( -- )
   $49 c, $23 c, $07 c,           \ and rax, [r15]
@@ -689,6 +701,7 @@ variable str-ptr-cur  static-strings-start str-ptr-cur !
 
 \ Create all builtin word names as static strings
 s" dup" s, 2constant $dup
+s" dup2" s, 2constant $dup2
 s" drop" s, 2constant $drop
 s" swap" s, 2constant $swap
 s" over" s, 2constant $over
@@ -705,6 +718,8 @@ s" mod" s, 2constant $mod
 s" negate" s, 2constant $negate
 s" 1+" s, 2constant $1+
 s" 1-" s, 2constant $1-
+s" 2+" s, 2constant $2+
+s" 2-" s, 2constant $2-
 s" and" s, 2constant $and
 s" or" s, 2constant $or
 s" xor" s, 2constant $xor
@@ -887,6 +902,7 @@ variable num-neg
 \ Alternative: check each word directly using static strings
 : compile-builtin ( addr u -- found? )
   2dup $dup str= if 2drop gen-dup true exit then
+  2dup $dup2 str= if 2drop gen-dup2 true exit then
   2dup $drop str= if 2drop gen-drop true exit then
   2dup $swap str= if 2drop gen-swap true exit then
   2dup $over str= if 2drop gen-over true exit then
@@ -903,6 +919,8 @@ variable num-neg
   2dup $negate str= if 2drop gen-negate true exit then
   2dup $1+ str= if 2drop gen-1+ true exit then
   2dup $1- str= if 2drop gen-1- true exit then
+  2dup $2+ str= if 2drop gen-2+ true exit then
+  2dup $2- str= if 2drop gen-2- true exit then
   2dup $and str= if 2drop gen-and true exit then
   2dup $or str= if 2drop gen-or true exit then
   2dup $xor str= if 2drop gen-xor true exit then
@@ -1047,14 +1065,23 @@ variable out-len
 : get-out ( -- addr u ) out-name out-len @ ;
 
 \ Entry point - compile file from command line
-\ Run from command line: fifth tf.fs
-\ Input: input.fs  Output: output
+\ Usage: fifth tf.fs input.fs output
+
+: usage ( -- )
+  ." Usage: fifth tf.fs <input.fs> <output>" cr bye ;
+
+: make-executable ( -- )
+  s" chmod +x " pad swap move
+  get-out pad 9 + swap move
+  pad 9 out-len @ + 0 swap c!
+  pad system drop ;
 
 : main-entry ( -- )
-  s" input.fs" save-src
-  s" output" save-out
+  argc 4 < if usage then
+  2 argv save-src
+  3 argv save-out
   get-src get-out compile-file
-  s" chmod +x output" system drop
+  make-executable
   bye ;
 
 main-entry
