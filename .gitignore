@@ -12,3 +12,15 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+
+# Build outputs (root level test binaries)
+/mandelbrot
+/primes
+/qsort
+/sieve
+/sieve-1m
+/sieve-fast
+/sieve-opt
+/square
+/sum
+/a.out

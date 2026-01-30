@@ -6,6 +6,7 @@
 
 #include "fifth.h"
 #include <pthread.h>
+#include <unistd.h>
 
 #define MAX_THREADS 64
 
