@@ -512,55 +512,44 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 \ ============================================================
 
 \ do ( limit index -- )  R: -- limit index
-\ TOS=index, [r15]=limit
+\ Uses r12=index, r13=limit for speed. Push old values for nesting.
 : gen-do ( -- do-addr )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]  ; limit
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8      ; drop limit from data stack
-  $53 c,                         \ push rbx        ; limit to return stack
-  $50 c,                         \ push rax        ; index to return stack
+  $41 c, $54 c,                  \ push r12        ; save outer index
+  $41 c, $55 c,                  \ push r13        ; save outer limit
+  $4d c, $8b c, $2f c,           \ mov r13, [r15]  ; limit from stack
+  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8      ; drop limit
+  $49 c, $89 c, $c4 c,           \ mov r12, rax    ; index = TOS
   pop-tos                        \ new TOS from data stack
-  code-here ;                         \ leave loop start address
+  code-here ;                    \ leave loop start address
 
-\ loop ( -- )  R: limit index -- | limit index+1
+\ loop ( -- )  inc r12, cmp r13, jl back, then restore
 : gen-loop ( do-addr -- )
-  $58 c,                         \ pop rax         ; index
-  $48 c, $ff c, $c0 c,           \ inc rax
-  $48 c, $3b c, $04 c, $24 c,    \ cmp rax, [rsp]  ; compare with limit
-  $7c c, 3 c,                    \ jl +3           ; if less, continue loop
-  $58 c,                         \ pop (discard limit)
-  $eb c, 0 c,                    \ jmp exit (patched below)
-  code-here swap                      \ ( exit-patch do-addr )
-  $50 c,                         \ push rax        ; save index
-  $e9 c,                         \ jmp do-addr
-  code-here 4 + - d,                  \ backward jump; consumes do-addr, leaves ( exit-patch )
-  code-here over -                    \ offset = code-here - exit-patch: ( exit-patch offset )
-  swap 1- code-buf + c! ;        \ store at displacement byte
+  $49 c, $ff c, $c4 c,           \ inc r12
+  $4d c, $39 c, $ec c,           \ cmp r12, r13
+  $0f c, $8c c,                  \ jl rel32
+  code-here 4 + - d,             \ backward jump offset: do-addr - (here+4)
+  $41 c, $5d c,                  \ pop r13         ; restore outer limit
+  $41 c, $5c c, ;                \ pop r12         ; restore outer index        \ store at displacement byte
 
 \ +loop ( n -- )  R: limit index -- | limit index+n
 : gen-+loop ( do-addr -- )
-  $5b c,                         \ pop rbx         ; index
-  $48 c, $01 c, $c3 c,           \ add rbx, rax    ; index += n
+  $49 c, $01 c, $c4 c,           \ add r12, rax    ; index += n
   pop-tos                        \ get new TOS
-  $48 c, $3b c, $1c c, $24 c,    \ cmp rbx, [rsp]  ; compare with limit
-  $7c c, 3 c,                    \ jl +3           ; if less, continue
-  $58 c,                         \ pop (discard limit)
-  $eb c, 0 c,                    \ jmp exit (patched below)
-  code-here swap                      \ ( exit-patch do-addr )
-  $53 c,                         \ push rbx        ; save index
-  $e9 c,                         \ jmp do-addr
-  code-here 4 + - d,                  \ backward jump; consumes do-addr, leaves ( exit-patch )
-  code-here over -                    \ offset = code-here - exit-patch
-  swap 1- code-buf + c! ;        \ store at displacement byte
+  $4d c, $39 c, $ec c,           \ cmp r12, r13
+  $0f c, $8c c,                  \ jl rel32
+  code-here 4 + - d,             \ backward jump offset
+  $41 c, $5d c,                  \ pop r13         ; restore outer limit
+  $41 c, $5c c, ;                \ pop r12         ; restore outer index
 
 \ i ( -- index )  copy loop index to data stack
 : gen-i ( -- )
   push-tos
-  $48 c, $8b c, $04 c, $24 c, ;  \ mov rax, [rsp]
+  $4c c, $89 c, $e0 c, ;         \ mov rax, r12
 
 \ j ( -- index )  outer loop index
 : gen-j ( -- )
   push-tos
-  $48 c, $8b c, $44 c, $24 c, 16 c, ;  \ mov rax, [rsp+16]
+  $48 c, $8b c, $44 c, $24 c, 8 c, ;   \ mov rax, [rsp+8]  ; outer index
 
 \ ============================================================
 \ RECURSE
@@ -1067,14 +1056,16 @@ variable out-len
 \ Entry point - compile file from command line
 \ Usage: fifth tf.fs input.fs output
 
+create cmd-buf 128 allot
+
 : usage ( -- )
   ." Usage: fifth tf.fs <input.fs> <output>" cr bye ;
 
 : make-executable ( -- )
-  s" chmod +x " pad swap move
-  get-out pad 9 + swap move
-  pad 9 out-len @ + 0 swap c!
-  pad system drop ;
+  s" chmod +x " cmd-buf swap move
+  get-out cmd-buf 9 + swap move
+  cmd-buf 9 out-len @ + 0 swap c!
+  cmd-buf system drop ;
 
 : main-entry ( -- )
   argc 4 < if usage then
