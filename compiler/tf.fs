@@ -42,6 +42,9 @@ variable cf-sp  0 cf-sp !
 variable state  0 state !   \ 0=interpret, 1=compile
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 
+\ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
+variable stack-depth  0 stack-depth !
+
 \ ============================================================
 \ CODE EMISSION
 \ ============================================================
@@ -146,14 +149,43 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 \ ============================================================
 
 \ Push rax to stack: sub r15,8; mov [r15],rax
+\ Register model: rax=TOS, rbx=NOS, rcx=third, [r15]=fourth+
 : push-tos ( -- )
-  $49 c, $83 c, $ef c, 8 c,      \ sub r15, 8
-  $49 c, $89 c, $07 c, ;         \ mov [r15], rax
+  stack-depth @
+  dup 3 >= if                    \ spill rcx to memory
+    $49 c, $83 c, $ef c, 8 c,    \ sub r15, 8
+    $49 c, $89 c, $0f c,         \ mov [r15], rcx
+  then
+  dup 2 >= if                    \ shift rbx to rcx
+    $48 c, $89 c, $d9 c,         \ mov rcx, rbx
+  then
+  drop
+  $48 c, $89 c, $c3 c,           \ mov rbx, rax
+  1 stack-depth +! ;
 
-\ Pop to rax: mov rax,[r15]; add r15,8
 : pop-tos ( -- )
-  $49 c, $8b c, $07 c,           \ mov rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $89 c, $d8 c,           \ mov rax, rbx
+  stack-depth @ 1- dup
+  2 >= if                        \ shift rcx to rbx
+    $48 c, $89 c, $cb c,         \ mov rbx, rcx
+  then
+  3 >= if                        \ load rcx from memory
+    $49 c, $8b c, $0f c,         \ mov rcx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,    \ add r15, 8
+  then
+  -1 stack-depth +! ;
+
+\ Pop NOS after binary op consumed it (rax has result)
+: pop-nos ( -- )
+  stack-depth @ 1- dup
+  2 >= if                        \ shift rcx to rbx
+    $48 c, $89 c, $cb c,         \ mov rbx, rcx
+  then
+  3 >= if                        \ load rcx from memory
+    $49 c, $8b c, $0f c,         \ mov rcx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,    \ add r15, 8
+  then
+  -1 stack-depth +! ;
 
 \ ============================================================
 \ CODE GENERATION - PRIMITIVES
@@ -183,21 +215,31 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
   pop-tos ;
 
 : gen-swap ( -- )
-  \ xchg rax, [r15]
-  $49 c, $87 c, $07 c, ;
+  \ xchg rax, rbx - register only
+  $48 c, $87 c, $c3 c, ;
 
 : gen-over ( -- )
+  \ ( a b -- a b a ) Before: rbx=a, rax=b
   push-tos
-  $49 c, $8b c, $47 c, 8 c, ;    \ mov rax, [r15+8]
+  stack-depth @ 3 = if
+    $48 c, $89 c, $c8 c,         \ mov rax, rcx (a is now in rcx)
+  else
+    $49 c, $8b c, $07 c,         \ mov rax, [r15] (a in memory)
+  then ;
 
 : gen-rot ( -- )
-  \ a b c -- b c a  (stack: [r15+8]=a [r15]=b, rax=c)
-  \ Want: [r15+8]=b [r15]=c rax=a
-  $49 c, $8b c, $4f c, 8 c,      \ mov rcx, [r15+8]   ; a
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]     ; b
-  $49 c, $89 c, $5f c, 8 c,      \ mov [r15+8], rbx   ; store b
-  $49 c, $89 c, $07 c,           \ mov [r15], rax     ; store c
-  $48 c, $89 c, $c8 c, ;         \ mov rax, rcx       ; a to TOS
+  \ a b c -- b c a
+  stack-depth @ 3 = if
+    \ depth=3: rcx=a, rbx=b, rax=c. Want: rcx=b, rbx=c, rax=a
+    $48 c, $87 c, $c1 c,         \ xchg rax, rcx (now rax=a, rcx=c)
+    $48 c, $87 c, $cb c,         \ xchg rbx, rcx (now rbx=c, rcx=b)
+  else
+    \ depth>3: [r15]=a, rbx=b, rax=c. Memory fallback
+    $49 c, $8b c, $0f c,         \ mov rcx, [r15]     ; a
+    $49 c, $89 c, $1f c,         \ mov [r15], rbx     ; store b
+    $48 c, $89 c, $c3 c,         \ mov rbx, rax       ; b = c
+    $48 c, $89 c, $c8 c,         \ mov rax, rcx       ; TOS = a
+  then ;
 
 : gen-nip ( -- )  \ a b -- b
   $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
@@ -225,8 +267,8 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 \ ============================================================
 
 : gen-add ( -- )
-  $49 c, $03 c, $07 c,           \ add rax, [r15]
-  $49 c, $83 c, $c7 c, 8 c, ;    \ add r15, 8
+  $48 c, $01 c, $d8 c,           \ add rax, rbx
+  pop-nos ;
 
 : gen-sub ( -- )
   $49 c, $8b c, $1f c,           \ mov rbx, [r15]
@@ -516,10 +558,26 @@ variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 : gen-do ( -- do-addr )
   $41 c, $54 c,                  \ push r12        ; save outer index
   $41 c, $55 c,                  \ push r13        ; save outer limit
-  $4d c, $8b c, $2f c,           \ mov r13, [r15]  ; limit from stack
-  $49 c, $83 c, $c7 c, 8 c,      \ add r15, 8      ; drop limit
+  $49 c, $89 c, $dd c,           \ mov r13, rbx    ; limit = NOS (always in rbx)
   $49 c, $89 c, $c4 c,           \ mov r12, rax    ; index = TOS
-  pop-tos                        \ new TOS from data stack
+  \ Pop both limit and index (depth -= 2)
+  stack-depth @ 2 -
+  dup 2 = if
+    \ depth was 4: rax=rcx, rbx=[r15], pop 1 cell
+    $48 c, $89 c, $c8 c,         \ mov rax, rcx
+    $49 c, $8b c, $1f c,         \ mov rbx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,    \ add r15, 8
+  else dup 2 > if
+    \ depth was 5+: rax=rcx, rbx=[r15], rcx=[r15+8], pop 2 cells
+    $48 c, $89 c, $c8 c,         \ mov rax, rcx
+    $49 c, $8b c, $1f c,         \ mov rbx, [r15]
+    $49 c, $8b c, $4f c, 8 c,    \ mov rcx, [r15+8]
+    $49 c, $83 c, $c7 c, 16 c,   \ add r15, 16
+  else dup 1 = if
+    \ depth was 3: rax=rcx
+    $48 c, $89 c, $c8 c,         \ mov rax, rcx
+  then then then
+  stack-depth !
   code-here ;                    \ leave loop start address
 
 \ loop ( -- )  inc r12, cmp r13, jl back, then restore
@@ -588,6 +646,9 @@ variable start-jmp  \ Address of jump-to-start placeholder
 \ ============================================================
 
 : gen-dot ( -- )
+  stack-depth @ 3 >= if
+    $51 c,                       \ push rcx (save third stack element)
+  then
   $b9 c, 10 d,                   \ mov ecx, 10
   $45 c, $31 c, $c0 c,           \ xor r8d, r8d
   \ Check for negative
@@ -628,6 +689,9 @@ variable start-jmp  \ Address of jump-to-start placeholder
   $ba c, 1 d,
   $0f c, $05 c,
   $58 c,
+  stack-depth @ 3 >= if
+    $59 c,                       \ pop rcx (restore third stack element)
+  then
   pop-tos ;
 
 : gen-cr ( -- )
@@ -980,6 +1044,7 @@ variable current-def  0 current-def !
 : start-def ( addr u -- )
   dict-add
   code-here current-word-addr !
+  1 stack-depth !              \ assume at least 1 argument (conservative)
   1 state ! ;
 
 : end-def ( -- )

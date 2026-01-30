@@ -23,13 +23,13 @@ Measure against C compilers. Match them. Beat them.
 
 | Compiler | Time | vs GCC -O1 |
 |----------|------|------------|
-| Fifth | 0.083s | 2.4x slower |
-| Fifth +<if | 0.077s | 2.2x slower |
-| GCC -O0 | 0.106s | 3x slower |
-| GCC -O1 | 0.035s | baseline |
-| GCC -O2 | 0.011s | 3x faster |
+| Fifth (depth tracking) | 0.033s | 1.27x slower |
+| Fifth (NOS in rbx) | 0.065s | 2.5x slower |
+| GCC -O0 | 0.090s | 3.5x slower |
+| GCC -O1 | 0.026s | baseline |
+| GCC -O2 | 0.011s | 2.4x faster |
 
-**Fifth beats GCC -O0 on full suite.**
+**Fifth is 27% slower than GCC -O1.** Was 2.5x slower before depth tracking.
 
 ## Breakdown by Benchmark
 
@@ -41,7 +41,12 @@ Measure against C compilers. Match them. Beat them.
 
 ## Optimizations Applied
 
-1. **`<if` word** - Combines `< if` into single compare+branch, no flag conversion
+1. **Depth tracking** - Track stack depth at compile time, use registers for depth ≤ 3
+   - rax = TOS, rbx = NOS, rcx = third element
+   - Full benchmark: 0.065s → 0.033s (2x faster)
+   - `swap over +` in fib loop is now 100% register-based
+
+2. **`<if` word** - Combines `< if` into single compare+branch, no flag conversion
    - Fib speedup: 0.044s → 0.035s (20% faster)
    - Uses `jge` directly instead of setl/movzx/neg/test/jnz
 
@@ -143,13 +148,22 @@ GCC -O0 loads and stores to `[rbp-4]` every iteration. Fifth keeps everything in
 
 ```
 r15 = data stack pointer (grows down)
-rax = TOS (top of stack, cached)
-r14 = return stack pointer (for do/loop)
+rax = TOS (top of stack)
+rbx = NOS (second on stack)
+rcx = third on stack (when depth >= 3)
+r12 = do/loop index
+r13 = do/loop limit
 ```
 
-Stack operations:
-- push: `sub r15, 8; mov [r15], rax`
-- pop: `mov rax, [r15]; add r15, 8`
+Stack depth model:
+- depth 1: rax
+- depth 2: rax, rbx
+- depth 3: rax, rbx, rcx
+- depth 4+: rax, rbx, rcx, [r15], [r15+8], ...
+
+Stack operations with depth tracking:
+- push: shift registers (rax→rbx→rcx), spill rcx to [r15] if depth >= 3
+- pop: reverse shift, load from [r15] if depth was >= 4
 
 ## Plan: Next Optimizations
 
@@ -172,11 +186,12 @@ Stack operations:
 2. **Dead code elimination** - Remove unreachable branches
 3. **Strength reduction** - `2 *` → `shl rax, 1`
 
-### Phase 4: Register Allocation
+### Phase 4: Register Allocation ✓ DONE
 
-1. **Second TOS register** - Cache NOS in rbx
-2. **Loop variables in registers** - `do...loop` index in register
-3. **Spill analysis** - Minimize stack traffic
+1. ✓ **Depth tracking** - Track stack depth at compile time
+2. ✓ **Three-register model** - rax=TOS, rbx=NOS, rcx=third
+3. ✓ **Loop variables in registers** - r12=index, r13=limit
+4. ✓ **Spill to memory only at depth 4+**
 
 ## To Beat GCC -O2
 
