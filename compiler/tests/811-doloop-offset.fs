@@ -1,0 +1,2 @@
+\ Test 811: do loop starting from 5
+: main 10 5 do i . loop cr ;

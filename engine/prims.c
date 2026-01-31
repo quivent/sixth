@@ -877,9 +877,9 @@ static void p_argv(vm_t *vm) {
     if (n >= 0 && n < vm->argc) {
         char *arg = vm->argv[n];
         size_t len = strlen(arg);
-        /* Copy into reserved area at start of vm->mem (bytes 8-63) */
+        /* Copy into reserved area at start of vm->mem (bytes 8-263) */
         cell_t addr = 8;
-        if (len > 55) len = 55;
+        if (len > 255) len = 255;
         memcpy(vm->mem + addr, arg, len);
         push(vm, addr);
         push(vm, (cell_t)len);

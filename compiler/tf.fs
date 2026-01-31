@@ -48,10 +48,12 @@ variable stack-depth  0 stack-depth !
 \ Dead code elimination: track purity and stack effect
 variable has-io       0 has-io !        \ does current word have I/O?
 variable start-depth  0 start-depth !   \ stack depth at word entry
+variable arg-count    1 arg-count !     \ number of input arguments (from stack comment)
 
 \ Pending call elimination
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
 variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
+variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit cleanup)
 
 \ ============================================================
 \ CODE EMISSION
@@ -121,7 +123,42 @@ variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
 : dict-addr ( entry -- addr ) 24 + ;
 : dict-flags ( entry -- addr ) 28 + ;
 
+\ Forward reference fixup table: 32 entries x 28 bytes (24 name + 4 patch-addr)
+32 constant FIXUP-MAX
+create fixup-buf FIXUP-MAX 28 * allot
+variable fixup-count  0 fixup-count !
+
+: fixup-entry ( i -- addr ) 28 * fixup-buf + ;
+: fixup-name= ( addr u entry -- flag )
+  >r dup 23 > if 2drop r> drop false exit then
+  r@ over + c@ 0 <> if r> drop 2drop false exit then
+  r> swap 0 ?do
+    2dup i + c@ swap i + c@ <> if 2drop false unloop exit then
+  loop 2drop true ;
+
+variable fixup-patch  0 fixup-patch !
+variable fixup-entry-p  0 fixup-entry-p !
+: add-fixup ( name-addr name-u patch-from -- )
+  fixup-count @ FIXUP-MAX >= if ." Too many forward refs" cr 1 throw then
+  fixup-patch !                    \ save patch-from
+  fixup-count @ fixup-entry fixup-entry-p !
+  fixup-entry-p @ 24 0 fill       \ clear name field
+  fixup-patch @ fixup-entry-p @ 24 + !  \ store patch-from
+  dup 23 > if drop 23 then        \ ( name-addr len )
+  fixup-entry-p @ swap move        \ move name into entry
+  1 fixup-count +! ;
+
+variable fixup-target  0 fixup-target !
+: resolve-fixups ( addr u code-addr -- )
+  fixup-target ! fixup-count @ 0 ?do
+    2dup i fixup-entry fixup-name= if
+      fixup-target @ i fixup-entry 24 + @ 4 - patch-rel32
+      i fixup-entry 24 0 fill
+    then
+  loop 2drop ;
+
 : dict-add ( addr u -- )
+  2dup code-here resolve-fixups
   dict-entry >r
   r@ 24 0 fill          \ clear name field
   dup 23 > if drop 23 then  \ truncate
@@ -409,6 +446,12 @@ variable nos+-pending  0 nos+-pending !
   $48 c, $c1 c, $f8 c, 63 c,     \ sar rax, 63
   ;
 
+: gen-0> ( -- )
+  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $0f c, $9f c, $c0 c,           \ setg al
+  $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
+  $48 c, $f7 c, $d8 c, ;         \ neg rax
+
 \ ============================================================
 \ MEMORY
 \ ============================================================
@@ -582,11 +625,22 @@ variable nos+-pending  0 nos+-pending !
 \ CALLS
 \ ============================================================
 
+variable call-nargs  1 call-nargs !  \ arg count of callee (set before gen-call)
 : gen-call ( addr -- )
+  \ Save registers above callee's arg count
+  stack-depth @ 3 >= call-nargs @ 3 < and if $51 c, then   \ push rcx
+  stack-depth @ 2 >= call-nargs @ 2 < and if $53 c, then   \ push rbx
   $e8 c,                         \ call rel32
-  code-here 4 + - d, ;
+  code-here 4 + - d,
+  stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then   \ pop rbx
+  stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then   \ pop rcx
+  ;
 
 : gen-ret ( -- )
+  do-depth @ 0 ?do
+    $41 c, $5d c,                \ pop r13         ; unwind do/loop frame
+    $41 c, $5c c,                \ pop r12
+  loop
   $c3 c, ;
 
 \ ============================================================
@@ -596,6 +650,7 @@ variable nos+-pending  0 nos+-pending !
 \ do ( limit index -- )  R: -- limit index
 \ Uses r12=index, r13=limit for speed. Push old values for nesting.
 : gen-do ( -- do-addr )
+  1 do-depth +!
   $41 c, $54 c,                  \ push r12        ; save outer index
   $41 c, $55 c,                  \ push r13        ; save outer limit
   $49 c, $89 c, $dd c,           \ mov r13, rbx    ; limit = NOS (always in rbx)
@@ -627,7 +682,8 @@ variable nos+-pending  0 nos+-pending !
   $0f c, $8c c,                  \ jl rel32
   code-here 4 + - d,             \ backward jump offset: do-addr - (here+4)
   $41 c, $5d c,                  \ pop r13         ; restore outer limit
-  $41 c, $5c c, ;                \ pop r12         ; restore outer index        \ store at displacement byte
+  $41 c, $5c c,                  \ pop r12         ; restore outer index
+  -1 do-depth +! ;
 
 \ +loop ( n -- )  R: limit index -- | limit index+n
 : gen-+loop ( do-addr -- )
@@ -637,7 +693,8 @@ variable nos+-pending  0 nos+-pending !
   $0f c, $8c c,                  \ jl rel32
   code-here 4 + - d,             \ backward jump offset
   $41 c, $5d c,                  \ pop r13         ; restore outer limit
-  $41 c, $5c c, ;                \ pop r12         ; restore outer index
+  $41 c, $5c c,                  \ pop r12         ; restore outer index
+  -1 do-depth +! ;
 
 \ i ( -- index )  copy loop index to data stack
 : gen-i ( -- )
@@ -656,6 +713,7 @@ variable nos+-pending  0 nos+-pending !
 variable current-word-addr  0 current-word-addr !
 
 : gen-recurse ( -- )
+  arg-count @ call-nargs !
   current-word-addr @ gen-call ;
 
 : gen-tail-recurse ( -- )
@@ -712,15 +770,19 @@ variable start-jmp  \ Address of jump-to-start placeholder
   $58 c,                         \ pop rax
   $48 c, $f7 c, $d8 c,           \ neg rax
   \ digit_loop: (jns lands here too)
-  $b9 c, 10 d,                   \ mov ecx, 10 (AFTER syscall - syscall clobbers rcx)
-  $31 c, $d2 c,                  \ xor edx, edx
-  $f7 c, $f1 c,                  \ div ecx
+  code-here                      \ save digit_loop address
+  $48 c, $c7 c, $c1 c, 10 d,    \ mov rcx, 10 (64-bit)
+  $48 c, $31 c, $d2 c,           \ xor rdx, rdx
+  $48 c, $f7 c, $f1 c,           \ div rcx (64-bit)
   $83 c, $c2 c, $30 c,           \ add edx, '0'
   $52 c,                         \ push rdx
   $41 c, $ff c, $c0 c,           \ inc r8d
-  $85 c, $c0 c,                  \ test eax, eax
-  $75 c, $f1 c,                  \ jnz digit_loop
+  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $75 c,                         \ jnz digit_loop
+  dup code-here 1+ - c,          \ compute relative offset (target - after_jnz)
+  drop
   \ print_loop:
+  code-here                      \ save print_loop address
   $b8 c, 1 d,                    \ mov eax, 1
   $bf c, 1 d,                    \ mov edi, 1
   $48 c, $89 c, $e6 c,           \ mov rsi, rsp
@@ -728,7 +790,9 @@ variable start-jmp  \ Address of jump-to-start placeholder
   $0f c, $05 c,                  \ syscall
   $58 c,                         \ pop
   $41 c, $ff c, $c8 c,           \ dec r8d
-  $75 c, $e6 c,                  \ jnz print_loop
+  $75 c,                         \ jnz print_loop
+  dup code-here 1+ - c,          \ compute relative offset (target - after_jnz)
+  drop
   \ space
   $6a c, 32 c,                   \ push ' '
   $b8 c, 1 d,
@@ -851,6 +915,7 @@ s" <=" s, 2constant $<=
 s" >=" s, 2constant $>=
 s" 0=" s, 2constant $0=
 s" 0<" s, 2constant $0<
+s" 0>" s, 2constant $0>
 s" @" s, 2constant $@
 s" !" s, 2constant $!
 s" c@" s, 2constant $c@
@@ -1062,6 +1127,7 @@ variable num-neg
   2dup $>= str= if 2drop flush-pending gen->= true exit then
   2dup $0= str= if 2drop flush-pending gen-0= true exit then
   2dup $0< str= if 2drop flush-pending gen-0< true exit then
+  2dup $0> str= if 2drop flush-pending gen-0> true exit then
   2dup $@ str= if 2drop gen-@ true exit then
   2dup $! str= if 2drop flush-pending gen-! true exit then
   2dup $c@ str= if 2drop gen-c@ true exit then
@@ -1113,16 +1179,24 @@ variable current-def  0 current-def !
   \ Try as user word
   2dup dict-find ?dup if
     nip nip
-    dup dict-flags @              \ get flags
-    dup 2 and 0=                  \ pure? (no I/O)
-    swap 4 and 0= and if          \ and void? (no return)
-      drop exit                   \ eliminate the call entirely
+    \ DCE: eliminate calls to finalized pure-void words
+    \ Flags=0 means word is still being compiled (not yet finalized by end-def)
+    dup dict-flags @ ?dup if
+      dup 2 and 0=                  \ pure? (no I/O)
+      swap 4 and 0= and if          \ and void? (no return)
+        drop exit                   \ eliminate the call entirely
+      then
     then
+    \ Set callee arg count for gen-call save/restore
+    dup dict-flags @ dup if 3 rshift $F and else drop arg-count @ then
+    call-nargs !
     dict-addr @ gen-call exit
   then
-  \ Unknown word
-  ." Unknown word: " type cr
-  1 throw ;
+  \ Forward reference: emit call with placeholder, record fixup
+  1 call-nargs !
+  $e8 c,                         \ call rel32
+  0 d,                           \ placeholder offset
+  code-here add-fixup ;
 
 variable is-void  0 is-void !   \ set by ( -- ) comment
 
@@ -1147,6 +1221,7 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
   \ It's a stack comment - parse it manually
   1 input-pos +!                 \ skip (
   1 is-void !                    \ assume void
+  0 arg-count !                  \ count input args
   0 >r                           \ r: saw-dashdash
   begin
     skip-ws-only
@@ -1160,17 +1235,17 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
         else
           \ Single -, it's a stack item
           begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-          r> if 0 is-void ! 1 >r else 1 >r then
+          r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
         then
       else
         begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-        r> if 0 is-void ! 1 >r else 1 >r then
+        r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
       then
     else
       drop
       \ Skip token
       begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-      r> if 0 is-void ! 1 >r else 1 >r then
+      r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
     then
   again ;
 
@@ -1178,9 +1253,11 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
   dict-add
   code-here current-word-addr !
   0 has-io !
-  1 is-void !                  \ default void, stack comment overrides
+  0 is-void !                  \ default NOT void (safe for DCE), stack comment overrides
+  0 do-depth !                  \ reset do/loop nesting
+  1 arg-count !                 \ default 1 arg, stack comment overrides
   parse-stack-comment
-  1 stack-depth !
+  arg-count @ 1 max stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
@@ -1192,9 +1269,10 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
   else
     gen-ret
   then
-  \ Store flags: bit1=has-io, bit2=has-return
+  \ Store flags: bit1=has-io, bit2=has-return, bits3-6=arg-count
   has-io @ 1 lshift                         \ bit 1 = has-io
   is-void @ 0= if 4 or then                 \ bit 2 = has return (not void)
+  arg-count @ 3 lshift or                   \ bits 3-6 = arg count
   dict-buf dict-count @ 1- 32 * + dict-flags !
   0 state ! ;
 

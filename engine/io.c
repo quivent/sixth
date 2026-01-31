@@ -266,6 +266,25 @@ static void p_system(vm_t *vm) {
     system(cmd);
 }
 
+/* SYSTEM-RC ( addr u -- rc ) Execute shell command, return exit code */
+static void p_system_rc(vm_t *vm) {
+    cell_t len = pop(vm);
+    cell_t addr = pop(vm);
+    char cmd[8192];
+    int n = (len >= (cell_t)sizeof(cmd)) ? (int)sizeof(cmd) - 1 : (int)len;
+    memcpy(cmd, vm->mem + addr, n);
+    cmd[n] = '\0';
+    int status = system(cmd);
+    push(vm, WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
+
+/* CLOCK-MS ( -- ms ) Monotonic clock in milliseconds */
+static void p_clock_ms(vm_t *vm) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    push(vm, (cell_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000));
+}
+
 /* OPEN-PATH ( addr u -- ) Open file/URL with native OS handler, no fork */
 static void p_open_path(vm_t *vm) {
     cell_t len = pop(vm);
@@ -489,6 +508,8 @@ void io_init(vm_t *vm) {
 
     /* System */
     vm_add_prim(vm, "system",    p_system,    false);
+    vm_add_prim(vm, "system-rc", p_system_rc, false);
+    vm_add_prim(vm, "clock-ms",  p_clock_ms,  false);
     vm_add_prim(vm, "open-path", p_open_path, false);
     vm_add_prim(vm, "bye",       p_bye,       false);
     vm_add_prim(vm, "getenv",    p_getenv,    false);
