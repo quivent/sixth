@@ -33,6 +33,27 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 | tf.fs/gcc-O2 speed ratio | 0.88x | > 0.80x |
 | Correctness | 976/1050 (93%) | >= 976/1050 |
 
+### Per-Optimization Anchors (sustain these individually)
+
+| Optimization | Key Test | tf/gcc-O2 | Floor |
+|-------------|----------|-----------|-------|
+| Stack caching (TOS in rax) | 100-dup-add | 1.48x | > 1.2x |
+| Stack caching | 08-swap | 1.44x | > 1.2x |
+| Superinstruction `dup+` | 100-dup-add | 1.48x | > 1.2x |
+| Branch fusion `<if` | 450-dup-gt-while | 1.07x | > 0.9x |
+| do/loop registers (r12/r13) | 614-doloop-basic | 1.17x | > 1.0x |
+| Constant folding | 1002-fold-mul | 1.29x | > 1.0x |
+| Literal-op fusion | 1019-fuse-and-imm | 1.31x | > 1.0x |
+| Fusion in loop | 1047-fuse-in-loop | 1.32x | > 1.0x |
+| Tail-call (recurse→jmp) | 235-recurse-fact | 1.04x | > 0.9x |
+| Forward references | 1031-fwd-ref-chain | 1.20x | > 1.0x |
+
+**Known weak spots** (slower than gcc-O2, investigate later):
+- 320-factorial-5: 0.76x (non-tail recursion)
+- 1000-palindrome: 0.79x (complex control flow)
+- 1008-gcd-lcm: 0.82x (mutual recursion overhead)
+- 1032-fwd-ref-mutual: 0.87x (double-pass penalty)
+
 ### Regression Testing
 
 `compiler/regress.fs` — compiles each test with tf.fs, runs it, compares output to `\ expect:` comment. ~8 seconds for 1050 tests. No GCC needed.
