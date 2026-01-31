@@ -53,15 +53,10 @@ uses `nos+` (single `inc rbx` instruction) in a tight loop.
 | Benchmark | Interpreted | Native | gcc -O2 | vs Interp | vs gcc |
 |-----------|------------|--------|---------|-----------|--------|
 | **branch** (10M if/else) | 435ms | 9ms | 9ms | **48x** | 1.0x |
-| **arith-std** (100M do-loop acc) | 1371ms | 27ms | 1ms* | **51x** | 27x slow |
 | **stack** (10M swap in do) | 92ms | 3ms | 5ms | **31x** | 1.7x fast |
 | **nested** (1M nested do) | 13ms | 2ms | 1ms* | **6.5x** | 2x slow |
 
-\* gcc -O2 recognizes sum/count patterns and computes at compile time.
-
-Branch and stack are the clean wins — tf.fs matches or beats gcc-O2.
-arith-std and nested lose to gcc-O2 because gcc replaces the loop
-with a closed-form constant.
+\* gcc -O2 recognizes count pattern and computes at compile time.
 
 ### Per-Optimization Anchors (sustain these individually)
 
