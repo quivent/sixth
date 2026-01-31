@@ -1,1 +1,2 @@
+\ expect: 0
 : main -1 0 and . cr ;

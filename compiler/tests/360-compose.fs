@@ -1,3 +1,4 @@
+\ expect: 13
 \ Test 360: compose inc and double
 : inc 1+ ;
 : double dup + ;

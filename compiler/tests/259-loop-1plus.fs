@@ -1,2 +1,3 @@
+\ expect: 10
 \ Test: 1+ counting up in until loop → 10
 : main 0 begin 1+ dup 10 = until . cr ;

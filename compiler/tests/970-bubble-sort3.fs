@@ -1,3 +1,4 @@
+\ expect: 10 30 5 25
 \ Test 970: sort 2 pairs, verify compare-swap with deep stack
 \ order: ( a b -- max min ) so . . prints min then max
 : order ( a b -- hi lo ) 2dup < if swap then ;

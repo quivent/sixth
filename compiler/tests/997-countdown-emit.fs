@@ -1,3 +1,4 @@
+\ expect: 54321
 \ Test 997: countdown from 5 to 1 printing digits as ASCII
 \ '5'=53, '4'=52, '3'=51, '2'=50, '1'=49
 : digit 48 + emit ;

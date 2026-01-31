@@ -1,3 +1,4 @@
+\ expect: 15
 : div3? ( n -- flag ) 3 mod 0= ;
 : div5? ( n -- flag ) 5 mod 0= ;
 : div7? ( n -- flag ) 7 mod 0= ;

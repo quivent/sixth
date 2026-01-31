@@ -1,3 +1,4 @@
+\ expect: 20
 \ Test 988: nested word calls 5 deep, each modifying a value
 : f5 2+ ;
 : f4 f5 3 + ;

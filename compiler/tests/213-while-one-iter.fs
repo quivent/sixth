@@ -1,1 +1,2 @@
+\ expect: 1
 : main 1 begin dup 0 > while dup . 1- repeat drop cr ;

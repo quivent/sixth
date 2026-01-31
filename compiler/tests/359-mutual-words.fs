@@ -1,3 +1,4 @@
+\ expect: 16
 \ Test 359: composing different words
 : add3 3 + ;
 : mul2 dup + ;

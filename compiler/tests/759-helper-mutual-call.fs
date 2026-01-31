@@ -1,3 +1,4 @@
+\ expect: 12 3
 \ Test 759: two helpers both called from main
 : double 2* ;
 : half 2/ ;

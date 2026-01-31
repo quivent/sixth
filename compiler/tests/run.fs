@@ -1,4 +1,4 @@
-\ run.fs - Fifth native compiler test runner
+\ run.fs - Fifth native compiler test runner (strict output comparison)
 \ Usage: fifth compiler/tests/run.fs
 
 require lib/str.fs
@@ -9,6 +9,8 @@ require lib/str.fs
 variable pass    0 pass !
 variable cfail   0 cfail !
 variable rfail   0 rfail !
+variable wrong   0 wrong !
+variable skip    0 skip !
 variable total   0 total !
 variable total-ms  0 total-ms !
 
@@ -22,7 +24,6 @@ variable total-ms  0 total-ms !
   nip nip ;
 
 \ Extract test name from path like "compiler/tests/123-foo.fs"
-\ Uses variable because do/loop reserves the return stack
 variable last-slash
 : path>name ( addr u -- name-addr name-u )
   0 last-slash !
@@ -31,7 +32,6 @@ variable last-slash
     dup i + c@ [char] / = if i 1+ last-slash ! then
   loop
   drop last-slash @ +
-  \ Find dot, with bounds safety: scan at most 64 chars
   dup 64 + >r
   dup begin dup r@ < while dup c@ [char] . <> while 1+ repeat then
   r> drop
@@ -48,6 +48,66 @@ variable path-stash-len
 : stash-path ( addr u -- ) dup path-stash-len ! path-stash swap move ;
 : path$ ( -- addr u ) path-stash path-stash-len @ ;
 
+\ Expected output buffer
+create expect-buf 512 allot
+variable expect-len
+
+\ Actual output buffer
+create actual-buf 4096 allot
+variable actual-len
+
+\ Wrong test name log (for summary)
+create wrong-log 8192 allot
+variable wrong-log-len
+
+: wrong-log+ ( addr u -- )
+  wrong-log-len @ 8000 > if 2drop exit then
+  wrong-log wrong-log-len @ + over >r swap move r>
+  wrong-log-len +!
+  10 wrong-log wrong-log-len @ + c!
+  1 wrong-log-len +! ;
+
+\ Strip trailing whitespace
+: strip-ws ( addr u -- addr u' )
+  begin dup 0> while
+    2dup + 1- c@
+    dup 32 = over 10 = or over 13 = or over 9 = or
+    nip while
+    1-
+  repeat then ;
+
+\ Extract expect line via shell
+: get-expect ( -- flag )
+  0 expect-len !
+  str-reset
+  s" head -1 " str+
+  path$ str+
+  s"  > /tmp/t-firstline" str+
+  str$ system
+  s" /tmp/t-firstline" slurp-file
+  dup 10 < if 2drop 0 exit then
+  over c@ [char] \ <> if 2drop 0 exit then
+  over 1+ c@ 32 <> if 2drop 0 exit then
+  over 2 + c@ [char] e <> if 2drop 0 exit then
+  10 /string
+  2dup find-nl
+  dup 0= if
+    drop dup expect-len ! expect-buf swap move -1 exit
+  then
+  >r drop r>
+  dup 512 > if drop 512 then
+  dup expect-len !
+  expect-buf swap move -1 ;
+
+\ Read actual output (already normalized by shell pipeline)
+: get-actual ( -- )
+  0 actual-len !
+  s" /tmp/t-out" slurp-file
+  dup 4096 > if 2drop exit then
+  strip-ws
+  dup actual-len !
+  actual-buf swap move ;
+
 \ Run one test file
 : run-test ( path-addr path-u -- )
   1 total +!
@@ -56,7 +116,9 @@ variable path-stash-len
 
   clock-ms >r
 
-  \ Build + run compile command
+  get-expect
+
+  \ Compile
   str-reset
   s" ./fifth compiler/tf.fs " str+
   path$ str+
@@ -66,27 +128,57 @@ variable path-stash-len
 
   str$ system-rc
   0<> if
+    drop
     clock-ms r> - total-ms +!
     1 cfail +!
     [char] C emit
     exit
   then
 
-  \ Build + run execution command
-  str-reset
-  s" timeout 2 /tmp/t-" str+
-  stash$ str+
-  s"  >/dev/null 2>&1" str+
+  if
+    \ Run with output capture, normalize newlines to spaces
+    str-reset
+    s" timeout 2 /tmp/t-" str+
+    stash$ str+
+    s"  2>&1 | tr '\n' ' ' | tr -s ' ' > /tmp/t-out" str+
 
-  str$ system-rc
-  clock-ms r> - total-ms +!
+    str$ system-rc
+    clock-ms r> - total-ms +!
 
-  0<> if
-    1 rfail +!
-    [char] R emit
+    0<> if
+      1 rfail +!
+      [char] R emit
+      exit
+    then
+
+    get-actual
+    actual-buf actual-len @
+    expect-buf expect-len @
+    str= if
+      1 pass +!
+      [char] . emit
+    else
+      1 wrong +!
+      [char] W emit
+      stash$ wrong-log+
+    then
   else
-    1 pass +!
-    [char] . emit
+    \ No expect line - just check exit code
+    str-reset
+    s" timeout 2 /tmp/t-" str+
+    stash$ str+
+    s"  >/dev/null 2>&1" str+
+
+    str$ system-rc
+    clock-ms r> - total-ms +!
+
+    0<> if
+      1 rfail +!
+      [char] R emit
+    else
+      1 skip +!
+      [char] - emit
+    then
   then ;
 
 \ Stable buffer for file list
@@ -116,7 +208,6 @@ variable list-len
   2dup count-lines
   ." Running " . ." tests" cr
 
-  \ Process each line
   begin
     dup 0> while
     2dup find-nl >r
@@ -129,8 +220,15 @@ variable list-len
   cr cr
   ." TOTAL: " total @ .
   ." PASS: " pass @ .
+  ." WRONG: " wrong @ .
   ." CFAIL: " cfail @ .
   ." RFAIL: " rfail @ .
-  cr ." Time: " total-ms @ . ." ms" cr ;
+  ." SKIP: " skip @ .
+  cr ." Time: " total-ms @ . ." ms" cr
+
+  wrong @ 0> if
+    cr ." Wrong output:" cr
+    wrong-log wrong-log-len @ type
+  then ;
 
 run-all bye

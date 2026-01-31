@@ -1,1 +1,2 @@
+\ expect: -2
 : main 1 2 3 rot swap - . cr ;

@@ -1,3 +1,4 @@
+\ expect: 10 40
 \ Test 971: find min and max of 4 numbers
 \ min2 ( a b -- min ): keeps smaller
 : min2 ( a b -- c ) 2dup > if swap then drop ;

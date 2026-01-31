@@ -1,3 +1,4 @@
+\ expect: 8
 \ Test 361: deep call chain
 : a 1+ ;
 : b a a ;

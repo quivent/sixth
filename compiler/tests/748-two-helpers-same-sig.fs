@@ -1,3 +1,4 @@
+\ expect: 11 9
 \ Test 748: two helpers with same signature
 : add1 1+ ;
 : sub1 1- ;

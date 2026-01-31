@@ -1,3 +1,4 @@
+\ expect: 27
 \ Test 343: cube a number
 : square dup * ;
 : cube dup square * ;

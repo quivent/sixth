@@ -1,3 +1,4 @@
+\ expect: 12
 \ Test 721: composition inc then double
 : inc 1+ ;
 : double 2* ;

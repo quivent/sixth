@@ -1,3 +1,4 @@
+\ expect: 36
 \ Test 746: composition of three helpers
 : inc 1+ ;
 : dbl 2* ;
