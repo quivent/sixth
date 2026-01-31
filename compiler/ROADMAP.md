@@ -37,16 +37,31 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 
 Heavy-iteration benchmarks in `bench/`. These measure the full compiler payoff.
 
+**Custom-word benchmarks** (nos+, 1-nzloop — tf.fs superinstructions):
+
+| Benchmark | Interpreted | Native | gcc -O2 | vs Interp | vs gcc |
+|-----------|------------|--------|---------|-----------|--------|
+| **arith** (10M nos+/1-nzloop) | 124ms | 1ms | 1ms | **124x** | 1.0x |
+| **loop** (100M 1-nzloop) | 1577ms | 1ms | 1ms | **1577x** | 1.0x |
+
+These match gcc-O2 exactly. The loop benchmark uses empty-body detection
+(gen-1-nzloop emits `xor eax,eax` when body is empty). The arith benchmark
+uses `nos+` (single `inc rbx` instruction) in a tight loop.
+
+**Standard-word benchmarks** (portable Forth, no custom words):
+
 | Benchmark | Interpreted | Native | gcc -O2 | vs Interp | vs gcc |
 |-----------|------------|--------|---------|-----------|--------|
 | **branch** (10M if/else) | 435ms | 9ms | 9ms | **48x** | 1.0x |
-| **arith** (100M do-loop acc) | 1371ms | 37ms | 1ms* | **37x** | 37x slow |
+| **arith-std** (100M do-loop acc) | 1371ms | 27ms | 1ms* | **51x** | 27x slow |
 | **stack** (10M swap in do) | 92ms | 3ms | 5ms | **31x** | 1.7x fast |
 | **nested** (1M nested do) | 13ms | 2ms | 1ms* | **6.5x** | 2x slow |
 
 \* gcc -O2 recognizes sum/count patterns and computes at compile time.
 
-Branch and stack are the clean wins — tf.fs matches or beats gcc-O2 while being 30-48x faster than interpreted. Arith and nested lose to gcc-O2 because gcc replaces the loop entirely with a closed-form constant.
+Branch and stack are the clean wins — tf.fs matches or beats gcc-O2.
+arith-std and nested lose to gcc-O2 because gcc replaces the loop
+with a closed-form constant.
 
 ### Per-Optimization Anchors (sustain these individually)
 
