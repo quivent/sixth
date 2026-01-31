@@ -569,7 +569,7 @@ variable nos+-pending  0 nos+-pending !
   $48 c, $f7 c, $f9 c,             \ idiv rcx → rax=quot, rdx=rem
   \ Fixup: if rdx != 0 && (rdx ^ rcx) < 0 then rdx+=rcx, rax-=1
   $48 c, $85 c, $d2 c,             \ test rdx, rdx
-  $74 c, 15 c,                     \ jz +15 (skip fixup if rem=0)
+  $74 c, 17 c,                     \ jz +17 (skip fixup if rem=0)
   $48 c, $89 c, $d6 c,             \ mov rsi, rdx
   $48 c, $31 c, $ce c,             \ xor rsi, rcx
   $48 c, $85 c, $f6 c,             \ test rsi, rsi
