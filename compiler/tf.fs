@@ -480,16 +480,38 @@ variable nos+-pending  0 nos+-pending !
 
 : gen-lshift ( -- )
   \ ( value count -- result ) count=rax, value=rbx
-  $48 c, $89 c, $c1 c,
-  $48 c, $89 c, $d8 c,
-  $48 c, $d3 c, $e0 c,
+  \ Save count to cl via x86 stack, then use pop-nos pattern
+  $51 c,                                \ push rcx (save 3rd item)
+  $48 c, $89 c, $c1 c,                 \ mov rcx, rax (count → cl)
+  $48 c, $89 c, $d8 c,                 \ mov rax, rbx (value → rax)
+  $48 c, $d3 c, $e0 c,                 \ shl rax, cl
+  $59 c,                                \ pop rcx (restore 3rd item)
+  \ Now promote: rbx=rcx, rcx=mem if needed
+  stack-depth @ 1- dup
+  2 >= if
+    $48 c, $89 c, $cb c,               \ mov rbx, rcx
+  then
+  3 >= if
+    $49 c, $8b c, $0f c,               \ mov rcx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,          \ add r15, 8
+  then
   -1 stack-depth +! ;
 
 : gen-rshift ( -- )
   \ ( value count -- result ) count=rax, value=rbx
-  $48 c, $89 c, $c1 c,
-  $48 c, $89 c, $d8 c,
-  $48 c, $d3 c, $e8 c,
+  $51 c,                                \ push rcx
+  $48 c, $89 c, $c1 c,                 \ mov rcx, rax
+  $48 c, $89 c, $d8 c,                 \ mov rax, rbx
+  $48 c, $d3 c, $e8 c,                 \ shr rax, cl
+  $59 c,                                \ pop rcx
+  stack-depth @ 1- dup
+  2 >= if
+    $48 c, $89 c, $cb c,               \ mov rbx, rcx
+  then
+  3 >= if
+    $49 c, $8b c, $0f c,               \ mov rcx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,          \ add r15, 8
+  then
   -1 stack-depth +! ;
 
 \ ============================================================
