@@ -1,6 +1,6 @@
 \ compare.fs - Compare tf.fs native vs gcc -O2 on bench/*.fs
 \ Usage: ./fifth bench/compare.fs
-\ Compiles each bench with tf.fs, times native vs bench_c (gcc -O2).
+\ Shows compile time and runtime for both compilers.
 \ Ratio = tf/gcc (lower is better for tf.fs, 1.00 = equal).
 
 require lib/str.fs
@@ -24,7 +24,6 @@ create name-buf 64 allot  variable name-len
 : stash-name ( addr u -- ) dup name-len ! name-buf swap move ;
 : name$ ( -- addr u ) name-buf name-len @ ;
 
-\ Pad name to 8 chars
 : .name ( -- )
   name$ type
   8 name-len @ - dup 0> if spaces else drop then ;
@@ -43,10 +42,8 @@ create name-buf 64 allot  variable name-len
   2dup < if swap then drop
   min ;
 
-\ Print single digit
 : .d ( n -- ) [char] 0 + emit ;
 
-\ Print N.NNx from value*100
 : .x100 ( n -- )
   dup 0< if [char] - emit negate then
   dup 9999 > if
@@ -58,71 +55,78 @@ create name-buf 64 allot  variable name-len
   10 mod .d
   [char] x emit ;
 
-variable native-ms
-variable gcc-ms
+: .ratio ( tf-ms gcc-ms -- )
+  over 0= over 0= or if 2drop s" -" type exit then
+  swap 100 * swap / .x100 ;
+
+variable tf-comp
+variable gcc-comp
+variable tf-run
+variable gcc-run
 
 : run-bench ( addr u -- )
   stash-name
 
-  \ Compile with tf.fs
+  \ --- Compile with tf.fs (median of 3) ---
   cmd-reset
   s" ./fifth compiler/tf.fs bench/" cmd+
   name$ cmd+
   s" .fs /tmp/_bench_cmp >/dev/null 2>&1" cmd+
+  cmd$ time3 tf-comp !
+
+  \ Check it compiled
+  cmd-reset s" test -f /tmp/_bench_cmp" cmd+
   cmd$ system-rc
   0<> if
-    ." | " .name ."  | SKIP  | -     | -     |" cr
+    ." | " .name ."  | SKIP | - | - | - | - | - |" cr
     exit
   then
 
-  \ Time native (single run, check for crash via exit code)
+  \ --- Compile with gcc -O2 (median of 3) ---
+  cmd-reset
+  s" gcc -O2 -o /tmp/_bench_gcc bench/bench.c >/dev/null 2>&1" cmd+
+  cmd$ time3 gcc-comp !
+
+  \ --- Run native (check crash first) ---
   cmd-reset
   s" timeout 2 /tmp/_bench_cmp >/dev/null 2>&1" cmd+
   clock-ms t0 !
   cmd$ system-rc
-  clock-ms t0 @ - native-ms !
+  clock-ms t0 @ - drop
   0<> if
-    ." | " .name ."  | CRASH | -     | -     |" cr
+    ." | " .name ."  | "
+    tf-comp @ . ." ms | "
+    gcc-comp @ . ." ms | "
+    ." CRASH | - | - |" cr
     exit
   then
 
-  \ Now median of 3 (we know it works)
+  \ Median of 3 runtime
   cmd-reset
   s" /tmp/_bench_cmp >/dev/null 2>&1" cmd+
-  cmd$ time3 native-ms !
+  cmd$ time3 tf-run !
 
-  \ Time gcc
+  \ --- Run gcc ---
   cmd-reset
-  s" timeout 3 bench/bench_c " cmd+
+  s" /tmp/_bench_gcc " cmd+
   name$ cmd+
   s"  >/dev/null 2>&1" cmd+
-  cmd$ time3 gcc-ms !
+  cmd$ time3 gcc-run !
 
-  \ Print row: | name | tf ms | gcc ms | tf/gcc ratio |
+  \ --- Print row ---
   ." | " .name ."  | "
-  native-ms @ . ." ms | "
-  gcc-ms @ . ." ms | "
-  \ Ratio = native * 100 / gcc (100 = 1.00x, lower = tf wins)
-  gcc-ms @ 0= native-ms @ 0= or if
-    s" ~1.00x" type
-  else
-    native-ms @ 100 * gcc-ms @ / .x100
-  then
+  tf-comp @ . ." ms | "
+  gcc-comp @ . ." ms | "
+  tf-run @ . ." ms | "
+  gcc-run @ . ." ms | "
+  tf-run @ gcc-run @ .ratio
   ."  |" cr ;
 
-: ensure-gcc ( -- )
-  cmd-reset s" test -f bench/bench_c" cmd+
-  cmd$ system-rc
-  0<> if
-    s" gcc -O2 -o bench/bench_c bench/bench.c" system
-    ." Compiled bench/bench_c" cr
-  then ;
-
 : main ( -- )
-  ensure-gcc
+  s" rm -f /tmp/_bench_cmp /tmp/_bench_gcc" system
   cr
-  ." | Bench    | tf.fs  | gcc-O2 | tf/gcc |" cr
-  ." |----------|--------|--------|--------|" cr
+  ." | Bench    | tf comp | gcc comp | tf run | gcc run | tf/gcc |" cr
+  ." |----------|---------|----------|--------|---------|--------|" cr
 
   s" arith"  run-bench
   s" loop"   run-bench
