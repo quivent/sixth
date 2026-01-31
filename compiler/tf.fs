@@ -1,6 +1,33 @@
 \ tf.fs - Fifth Native Compiler
 \ Self-hosting: fifth tf.fs tf.fs → native tf compiler
 \ Then: ./tf program.fs → native program
+\
+\ OPTIMIZATIONS IN THIS FILE (do not remove without understanding):
+\
+\   1. CONSTANT FOLDING - Evaluate literal arithmetic at compile time.
+\      e.g. 3 7 + compiles as push 10 (zero instructions wasted).
+\      Impl: ct-stack, ct-push/ct-pop/ct-flush, fold paths in compile-builtin.
+\      Tests: 1000-1015, 1027-1029, 1035-1037, 1042, 1044-1046, 1049
+\
+\   2. LITERAL-OP FUSION - Fuse literal with runtime arithmetic into one x86 insn.
+\      e.g. runtime_val 3 * emits imul rax,rax,3 instead of push+load+mul+pop.
+\      Impl: gen-add-imm, gen-sub-imm, gen-mul-imm, gen-and-imm, gen-or-imm,
+\            gen-xor-imm, fuse paths (ct-depth=1) in compile-builtin.
+\      Tests: 1016-1021, 1034, 1043, 1047
+\
+\   3. DOUBLE PASS - Scan source first to build word-info table, then compile.
+\      Resolves forward references with correct nargs instead of guessing 1.
+\      Impl: scan-all, info-buf, info-find, scan-stack-comment, scan-body-io.
+\      Tests: 1030-1033, 1048
+\
+\   4. DEAD CODE ELIMINATION - Pure void words called for side effects are tracked.
+\      Impl: has-io, is-void, pending-call, pending-pure, dict-flags encoding.
+\
+\   5. TAIL-CALL OPTIMIZATION - recurse at end of definition becomes jmp.
+\      Impl: tail-recurse variable, patch in end-def.
+\
+\   6. REGISTER-BASED STACK - stack-depth tracks TOS in rax/rbx/rcx/memory.
+\      Avoids memory traffic for shallow stacks (depth <= 3).
 
 \ ============================================================
 \ MISSING WORDS
@@ -42,10 +69,12 @@ variable cf-sp  0 cf-sp !
 variable state  0 state !   \ 0=interpret, 1=compile
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 
+\ OPTIMIZATION 6: REGISTER-BASED STACK
 \ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
+\ Shallow stacks (depth <= 3) live entirely in registers, no memory traffic.
 variable stack-depth  0 stack-depth !
 
-\ Dead code elimination: track purity and stack effect
+\ OPTIMIZATION 4: DEAD CODE ELIMINATION - track purity and stack effect
 variable has-io       0 has-io !        \ does current word have I/O?
 variable start-depth  0 start-depth !   \ stack depth at word entry
 variable arg-count    1 arg-count !     \ number of input arguments (from stack comment)
@@ -54,6 +83,15 @@ variable arg-count    1 arg-count !     \ number of input arguments (from stack 
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
 variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
 variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit cleanup)
+
+\ Compile-time constant stack for literal folding/fusion
+create ct-stack 8 cells allot
+variable ct-depth  0 ct-depth !
+
+\ Word info table for double-pass (Pass 1 scan)
+64 constant INFO-MAX
+create info-buf INFO-MAX 32 * allot   \ 24 name + 4 nargs + 4 flags
+variable info-count  0 info-count !
 
 \ ============================================================
 \ CODE EMISSION
@@ -65,13 +103,12 @@ variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit 
 
 : code-here ( -- addr ) code-pos @ ;
 : patch-rel32 ( target from -- )
-  \ Calculate rel32 offset and store as 4 bytes (not cell!)
-  dup >r  4 + -               \ offset = target - (from + 4)
-  r> code-buf +               \ addr = code-buf + from
-  2dup c!                     \ byte 0
-  swap 8 rshift swap 1+ 2dup c!   \ byte 1
-  swap 8 rshift swap 1+ 2dup c!   \ byte 2
-  swap 8 rshift swap 1+ c! ;      \ byte 3
+  dup >r  4 + -
+  r> code-buf +
+  2dup c!
+  swap 8 rshift swap 1+ 2dup c!
+  swap 8 rshift swap 1+ 2dup c!
+  swap 8 rshift swap 1+ c! ;
 
 \ ============================================================
 \ ELF EMISSION
@@ -84,20 +121,19 @@ variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit 
 
 : elf-header ( -- )
   0 elf-pos !
-  $7f e, 69 e, 76 e, 70 e,       \ ELF magic
-  2 e, 1 e, 1 e, 0 e,             \ 64-bit, little-endian, ELF v1, SysV ABI
-  0 e8,                           \ padding
-  2 e2, $3e e2, 1 e4,             \ executable, x86_64, ELF v1
-  $400078 e8,                     \ entry point
-  64 e8, 0 e8, 0 e4,              \ phoff=64, shoff=0, flags=0
-  64 e2, 56 e2, 1 e2,             \ ehsize=64, phentsize=56, phnum=1
-  0 e2, 0 e2, 0 e2,               \ shentsize=0, shnum=0, shstrndx=0
-  \ Program header
-  1 e4, 7 e4, 0 e8,               \ PT_LOAD, flags=RWX, offset=0
-  $400000 e8, $400000 e8,         \ vaddr, paddr
-  120 code-pos @ + e8,            \ filesz = header + code
-  $10000 e8,                      \ memsz = 64KB (includes data stack at 0x408000)
-  $1000 e8, ;                     \ align
+  $7f e, 69 e, 76 e, 70 e,
+  2 e, 1 e, 1 e, 0 e,
+  0 e8,
+  2 e2, $3e e2, 1 e4,
+  $400078 e8,
+  64 e8, 0 e8, 0 e4,
+  64 e2, 56 e2, 1 e2,
+  0 e2, 0 e2, 0 e2,
+  1 e4, 7 e4, 0 e8,
+  $400000 e8, $400000 e8,
+  120 code-pos @ + e8,
+  $10000 e8,
+  $1000 e8, ;
 
 : write-elf ( addr u -- )
   w/o create-file throw >r
@@ -119,11 +155,10 @@ variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit 
 \ ============================================================
 
 : dict-entry ( -- addr ) dict-buf dict-count @ 32 * + ;
-: dict-name ( entry -- addr ) ;  \ first 24 bytes
+: dict-name ( entry -- addr ) ;
 : dict-addr ( entry -- addr ) 24 + ;
 : dict-flags ( entry -- addr ) 28 + ;
 
-\ Forward reference fixup table: 32 entries x 28 bytes (24 name + 4 patch-addr)
 32 constant FIXUP-MAX
 create fixup-buf FIXUP-MAX 28 * allot
 variable fixup-count  0 fixup-count !
@@ -140,12 +175,12 @@ variable fixup-patch  0 fixup-patch !
 variable fixup-entry-p  0 fixup-entry-p !
 : add-fixup ( name-addr name-u patch-from -- )
   fixup-count @ FIXUP-MAX >= if ." Too many forward refs" cr 1 throw then
-  fixup-patch !                    \ save patch-from
+  fixup-patch !
   fixup-count @ fixup-entry fixup-entry-p !
-  fixup-entry-p @ 24 0 fill       \ clear name field
-  fixup-patch @ fixup-entry-p @ 24 + !  \ store patch-from
-  dup 23 > if drop 23 then        \ ( name-addr len )
-  fixup-entry-p @ swap move        \ move name into entry
+  fixup-entry-p @ 24 0 fill
+  fixup-patch @ fixup-entry-p @ 24 + !
+  dup 23 > if drop 23 then
+  fixup-entry-p @ swap move
   1 fixup-count +! ;
 
 variable fixup-target  0 fixup-target !
@@ -160,18 +195,17 @@ variable fixup-target  0 fixup-target !
 : dict-add ( addr u -- )
   2dup code-here resolve-fixups
   dict-entry >r
-  r@ 24 0 fill          \ clear name field
-  dup 23 > if drop 23 then  \ truncate
-  r@ swap move          \ copy name
-  code-here r@ dict-addr !   \ store code address
-  0 r> dict-flags !     \ clear flags
+  r@ 24 0 fill
+  dup 23 > if drop 23 then
+  r@ swap move
+  code-here r@ dict-addr !
+  0 r> dict-flags !
   1 dict-count +! ;
 
 : dict-name= ( addr u entry -- flag )
-  \ Compare name against null-padded 24-byte field
   >r
   dup 23 > if 2drop r> drop false exit then
-  r@ over + c@ 0 <> if r> drop 2drop false exit then  \ check byte after name is 0
+  r@ over + c@ 0 <> if r> drop 2drop false exit then
   r> swap 0 ?do
     2dup i + c@ swap i + c@ <> if 2drop false unloop exit then
   loop
@@ -193,42 +227,39 @@ variable fixup-target  0 fixup-target !
 \ TOS MANAGEMENT (rax = TOS, r15 = stack pointer)
 \ ============================================================
 
-\ Push rax to stack: sub r15,8; mov [r15],rax
-\ Register model: rax=TOS, rbx=NOS, rcx=third, [r15]=fourth+
 : push-tos ( -- )
   stack-depth @
-  dup 3 >= if                    \ spill rcx to memory
-    $49 c, $83 c, $ef c, 8 c,    \ sub r15, 8
-    $49 c, $89 c, $0f c,         \ mov [r15], rcx
+  dup 3 >= if
+    $49 c, $83 c, $ef c, 8 c,
+    $49 c, $89 c, $0f c,
   then
-  dup 2 >= if                    \ shift rbx to rcx
-    $48 c, $89 c, $d9 c,         \ mov rcx, rbx
+  dup 2 >= if
+    $48 c, $89 c, $d9 c,
   then
   drop
-  $48 c, $89 c, $c3 c,           \ mov rbx, rax
+  $48 c, $89 c, $c3 c,
   1 stack-depth +! ;
 
 : pop-tos ( -- )
-  $48 c, $89 c, $d8 c,           \ mov rax, rbx
+  $48 c, $89 c, $d8 c,
   stack-depth @ 1- dup
-  2 >= if                        \ shift rcx to rbx
-    $48 c, $89 c, $cb c,         \ mov rbx, rcx
+  2 >= if
+    $48 c, $89 c, $cb c,
   then
-  3 >= if                        \ load rcx from memory
-    $49 c, $8b c, $0f c,         \ mov rcx, [r15]
-    $49 c, $83 c, $c7 c, 8 c,    \ add r15, 8
+  3 >= if
+    $49 c, $8b c, $0f c,
+    $49 c, $83 c, $c7 c, 8 c,
   then
   -1 stack-depth +! ;
 
-\ Pop NOS after binary op consumed it (rax has result)
 : pop-nos ( -- )
   stack-depth @ 1- dup
-  2 >= if                        \ shift rcx to rbx
-    $48 c, $89 c, $cb c,         \ mov rbx, rcx
+  2 >= if
+    $48 c, $89 c, $cb c,
   then
-  3 >= if                        \ load rcx from memory
-    $49 c, $8b c, $0f c,         \ mov rcx, [r15]
-    $4d c, $8d c, $7f c, 8 c,    \ lea r15, [r15+8] (no flag change!)
+  3 >= if
+    $49 c, $8b c, $0f c,
+    $4d c, $8d c, $7f c, 8 c,
   then
   -1 stack-depth +! ;
 
@@ -240,399 +271,360 @@ variable fixup-target  0 fixup-target !
   push-tos
   dup 0= if
     drop
-    $31 c, $c0 c,                 \ xor eax, eax (2 bytes)
+    $31 c, $c0 c,
   else dup $7FFFFFFF <= over $FFFFFFFF80000000 >= and if
-    $48 c, $c7 c, $c0 c, d,       \ mov rax, imm32 (sign-extended, 7 bytes)
+    $48 c, $c7 c, $c0 c, d,
   else
-    $48 c, $b8 c, q,              \ mov rax, imm64 (10 bytes)
+    $48 c, $b8 c, q,
   then then ;
 
-: gen-dup ( -- )
-  push-tos ;
+\ ============================================================
+\ COMPILE-TIME CONSTANT STACK
+\ ============================================================
+\ OPTIMIZATION 1: CONSTANT FOLDING infrastructure.
+\ Literals are pushed here instead of emitting code. When an
+\ arithmetic op follows, constants fold at compile time.
+\ ct-flush emits all pending constants (FIFO) when a non-foldable
+\ word is encountered (stack ops, control flow, I/O, calls).
+\ Tests: 1000-fold-add through 1049-fold-no-runtime-leak
+
+: ct-push ( n -- )    ct-stack ct-depth @ cells + !  1 ct-depth +! ;
+: ct-pop ( -- n )     -1 ct-depth +!  ct-stack ct-depth @ cells + @ ;
+: ct-flush ( -- )
+  ct-depth @ 0= if exit then
+  ct-depth @ 0 do
+    ct-stack i cells + @ gen-lit
+  loop
+  0 ct-depth ! ;
+
+: gen-dup ( -- )  push-tos ;
 
 : gen-dup2 ( -- )
-  \ ( a -- a a a ) Two dups in one, saves 3 bytes
-  $49 c, $83 c, $ef c, 16 c,      \ sub r15, 16
-  $49 c, $89 c, $07 c,            \ mov [r15], rax
-  $49 c, $89 c, $47 c, 8 c, ;     \ mov [r15+8], rax
+  $49 c, $83 c, $ef c, 16 c,
+  $49 c, $89 c, $07 c,
+  $49 c, $89 c, $47 c, 8 c, ;
 
-: gen-drop ( -- )
-  pop-tos ;
+: gen-drop ( -- )  pop-tos ;
 
-: gen-swap ( -- )
-  \ xchg rax, rbx - register only
-  $48 c, $87 c, $c3 c, ;
+: gen-swap ( -- )  $48 c, $87 c, $c3 c, ;
 
 : gen-over ( -- )
-  \ ( a b -- a b a ) Before: rbx=a, rax=b
-  \ After push-tos, old rbx (=a) is now in rcx regardless of depth
   push-tos
-  $48 c, $89 c, $c8 c, ;         \ mov rax, rcx (a is always in rcx after push-tos)
+  $48 c, $89 c, $c8 c, ;
 
 : gen-rot ( -- )
-  \ a b c -- b c a
-  \ Top 3 always in rax/rbx/rcx for depth>=3
-  $48 c, $87 c, $c1 c,         \ xchg rax, rcx (now rax=a, rcx=c)
-  $48 c, $87 c, $cb c, ;       \ xchg rbx, rcx (now rbx=c, rcx=b)
+  $48 c, $87 c, $c1 c,
+  $48 c, $87 c, $cb c, ;
 
-: gen-nip ( -- )  \ a b -- b
-  \ Drop NOS, keep TOS. Same as pop-nos but without a binary op result.
-  pop-nos ;
+: gen-nip ( -- )  pop-nos ;
 
-: gen-tuck ( -- )  \ a b -- b a b
-  gen-swap gen-over ;
+: gen-tuck ( -- )  gen-swap gen-over ;
 
 : gen-2dup ( -- )
-  \ ( a b -- a b a b ) Before: rax=b, rbx=a
-  \ Push both, then copy from rcx (=a after pushes) and rbx (now =b after first push)
-  push-tos                       \ depth+1: rax still has b, old rax(b) in rbx
-  $48 c, $89 c, $c8 c,          \ mov rax, rcx  ; a (NOS of original, now in rcx)
-  push-tos                       \ depth+1: push a copy
-  $48 c, $89 c, $c8 c, ;        \ mov rax, rcx  ; b (was pushed to rcx by push-tos)
+  push-tos
+  $48 c, $89 c, $c8 c,
+  push-tos
+  $48 c, $89 c, $c8 c, ;
 
-: gen-2drop ( -- )
-  pop-tos pop-tos ;
+: gen-2drop ( -- )  pop-tos pop-tos ;
 
 \ ============================================================
 \ ARITHMETIC
 \ ============================================================
 
-: gen-add ( -- )
-  $48 c, $01 c, $d8 c,           \ add rax, rbx
-  pop-nos ;
+: gen-add ( -- )  $48 c, $01 c, $d8 c,  pop-nos ;
 
 : gen-sub ( -- )
-  \ ( a b -- a-b ) where rax=b, rbx=a
-  $48 c, $29 c, $c3 c,           \ sub rbx, rax
-  $48 c, $89 c, $d8 c,           \ mov rax, rbx
+  $48 c, $29 c, $c3 c,
+  $48 c, $89 c, $d8 c,
   pop-nos ;
 
-: gen-mul ( -- )
-  $48 c, $0f c, $af c, $c3 c,    \ imul rax, rbx
-  pop-nos ;
+: gen-mul ( -- )  $48 c, $0f c, $af c, $c3 c,  pop-nos ;
 
 : gen-div ( -- )
-  \ ( a b -- a/b ) where rax=b (divisor), rbx=a (dividend)
-  \ idiv uses rdx:rax / operand. Use rdi as divisor to avoid rcx (stack reg)
-  stack-depth @ 3 >= if $51 c, then  \ push rcx if live
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax       ; divisor = b
-  $48 c, $89 c, $d8 c,           \ mov rax, rbx       ; dividend = a
-  $48 c, $99 c,                  \ cqo
-  $48 c, $f7 c, $ff c,           \ idiv rdi
-  stack-depth @ 3 >= if $59 c, then  \ pop rcx if saved
+  stack-depth @ 3 >= if $51 c, then
+  $48 c, $89 c, $c7 c,
+  $48 c, $89 c, $d8 c,
+  $48 c, $99 c,
+  $48 c, $f7 c, $ff c,
+  stack-depth @ 3 >= if $59 c, then
   pop-nos ;
 
 : gen-mod ( -- )
-  \ ( a b -- a mod b ) where rax=b (divisor), rbx=a (dividend)
-  stack-depth @ 3 >= if $51 c, then  \ push rcx if live
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax       ; divisor = b
-  $48 c, $89 c, $d8 c,           \ mov rax, rbx       ; dividend = a
-  $48 c, $99 c,                  \ cqo
-  $48 c, $f7 c, $ff c,           \ idiv rdi
-  $48 c, $89 c, $d0 c,           \ mov rax, rdx       ; result = remainder
-  stack-depth @ 3 >= if $59 c, then  \ pop rcx if saved
+  stack-depth @ 3 >= if $51 c, then
+  $48 c, $89 c, $c7 c,
+  $48 c, $89 c, $d8 c,
+  $48 c, $99 c,
+  $48 c, $f7 c, $ff c,
+  $48 c, $89 c, $d0 c,
+  stack-depth @ 3 >= if $59 c, then
   pop-nos ;
 
-: gen-negate ( -- )
-  $48 c, $f7 c, $d8 c, ;         \ neg rax
-
-: gen-1+ ( -- )
-  $48 c, $ff c, $c0 c, ;         \ inc rax
-
-: gen-1- ( -- )
-  $48 c, $ff c, $c8 c, ;         \ dec rax
-
-: gen-nos+ ( -- )
-  $48 c, $ff c, $c3 c, ;         \ inc rbx (NOS)
+: gen-negate ( -- )  $48 c, $f7 c, $d8 c, ;
+: gen-1+ ( -- )  $48 c, $ff c, $c0 c, ;
+: gen-1- ( -- )  $48 c, $ff c, $c8 c, ;
+: gen-nos+ ( -- )  $48 c, $ff c, $c3 c, ;
 
 variable nos+-pending  0 nos+-pending !
 
-: gen-2+ ( -- )
-  $48 c, $83 c, $c0 c, 2 c, ;    \ add rax, 2
+: gen-2+ ( -- )  $48 c, $83 c, $c0 c, 2 c, ;
+: gen-2- ( -- )  $48 c, $83 c, $e8 c, 2 c, ;
+: gen-tuck+ ( -- )  $48 c, $0f c, $c1 c, $d8 c, ;
 
-: gen-2- ( -- )
-  $48 c, $83 c, $e8 c, 2 c, ;    \ sub rax, 2
-
-: gen-tuck+ ( -- )
-  \ ( a b -- b a+b ) One instruction: xadd rax, rbx
-  $48 c, $0f c, $c1 c, $d8 c, ;  \ xadd rax, rbx
-
-: gen-and ( -- )
-  $48 c, $21 c, $d8 c,           \ and rax, rbx
-  pop-nos ;
-
-: gen-or ( -- )
-  $48 c, $09 c, $d8 c,           \ or rax, rbx
-  pop-nos ;
-
-: gen-xor ( -- )
-  $48 c, $31 c, $d8 c,           \ xor rax, rbx
-  pop-nos ;
-
-: gen-invert ( -- )
-  $48 c, $f7 c, $d0 c, ;         \ not rax
+: gen-and ( -- )  $48 c, $21 c, $d8 c,  pop-nos ;
+: gen-or ( -- )   $48 c, $09 c, $d8 c,  pop-nos ;
+: gen-xor ( -- )  $48 c, $31 c, $d8 c,  pop-nos ;
+: gen-invert ( -- )  $48 c, $f7 c, $d0 c, ;
 
 : gen-abs ( -- )
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax
-  $48 c, $f7 c, $d8 c,           \ neg rax
-  $48 c, $0f c, $48 c, $c7 c, ;  \ cmovs rax, rdi (if neg, restore original)
+  $48 c, $89 c, $c7 c,
+  $48 c, $f7 c, $d8 c,
+  $48 c, $0f c, $48 c, $c7 c, ;
 
-: gen-2* ( -- )
-  $48 c, $d1 c, $e0 c, ;         \ shl rax, 1
+: gen-2* ( -- )  $48 c, $d1 c, $e0 c, ;
+: gen-2/ ( -- )  $48 c, $d1 c, $f8 c, ;
 
-: gen-2/ ( -- )
-  $48 c, $d1 c, $f8 c, ;         \ sar rax, 1
+\ ============================================================
+\ FUSED IMMEDIATE ARITHMETIC (constant + runtime op)
+\ ============================================================
+\ OPTIMIZATION 2: LITERAL-OP FUSION codegen.
+\ When ct-depth=1 and a binary op follows, emit a single x86
+\ instruction with an immediate operand instead of push+op+pop.
+\ e.g. gen-add-imm emits "add rax, imm32" (3 bytes vs ~12).
+\ This is the key optimization for the arith benchmark:
+\   3 * 7 + $FFFFFF and → imul+add+and (3 insns, not ~21).
+\ Tests: 1016-fuse-add-imm through 1021-fuse-xor-imm, 1034, 1043, 1047
+
+: gen-add-imm ( n -- )  $48 c, $05 c, d, ;
+: gen-sub-imm ( n -- )  $48 c, $2d c, d, ;
+: gen-mul-imm ( n -- )  $48 c, $69 c, $c0 c, d, ;
+: gen-and-imm ( n -- )  $48 c, $25 c, d, ;
+: gen-or-imm  ( n -- )  $48 c, $0d c, d, ;
+: gen-xor-imm ( n -- )  $48 c, $35 c, d, ;
 
 \ ============================================================
 \ COMPARISON (result: 0 or -1)
 \ ============================================================
 
 : gen-cmp-setup ( -- )
-  \ NOS already in rbx, TOS in rax
-  $48 c, $39 c, $c3 c,           \ cmp rbx, rax
+  $48 c, $39 c, $c3 c,
   pop-nos ;
 
 : gen-= ( -- )
   gen-cmp-setup
-  $0f c, $94 c, $c0 c,           \ sete al
-  $48 c, $0f c, $b6 c, $c0 c,    \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;         \ neg rax (0->0, 1->-1)
+  $0f c, $94 c, $c0 c,
+  $48 c, $0f c, $b6 c, $c0 c,
+  $48 c, $f7 c, $d8 c, ;
 
 : gen-<> ( -- )
   gen-cmp-setup
-  $0f c, $95 c, $c0 c,           \ setne al
+  $0f c, $95 c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen-< ( -- )
   gen-cmp-setup
-  $0f c, $9c c, $c0 c,           \ setl al
+  $0f c, $9c c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen-> ( -- )
   gen-cmp-setup
-  $0f c, $9f c, $c0 c,           \ setg al
+  $0f c, $9f c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen-<= ( -- )
   gen-cmp-setup
-  $0f c, $9e c, $c0 c,           \ setle al
+  $0f c, $9e c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen->= ( -- )
   gen-cmp-setup
-  $0f c, $9d c, $c0 c,           \ setge al
+  $0f c, $9d c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen-0= ( -- )
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $94 c, $c0 c,           \ sete al
+  $48 c, $85 c, $c0 c,
+  $0f c, $94 c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
 : gen-0< ( -- )
-  $48 c, $c1 c, $f8 c, 63 c,     \ sar rax, 63
-  ;
+  $48 c, $c1 c, $f8 c, 63 c, ;
 
 : gen-0> ( -- )
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $9f c, $c0 c,           \ setg al
-  $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;         \ neg rax
+  $48 c, $85 c, $c0 c,
+  $0f c, $9f c, $c0 c,
+  $48 c, $0f c, $b6 c, $c0 c,
+  $48 c, $f7 c, $d8 c, ;
 
 \ ============================================================
 \ MEMORY
 \ ============================================================
 
-: gen-@ ( -- )
-  $48 c, $8b c, $00 c, ;         \ mov rax, [rax]
+: gen-@ ( -- )  $48 c, $8b c, $00 c, ;
 
 : gen-! ( -- )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $48 c, $89 c, $18 c,           \ mov [rax], rbx
-  $49 c, $8b c, $47 c, 8 c,      \ mov rax, [r15+8]
-  $49 c, $83 c, $c7 c, 16 c, ;   \ add r15, 16
+  $49 c, $8b c, $1f c,
+  $48 c, $89 c, $18 c,
+  $49 c, $8b c, $47 c, 8 c,
+  $49 c, $83 c, $c7 c, 16 c, ;
 
-: gen-c@ ( -- )
-  $48 c, $0f c, $b6 c, $00 c, ;  \ movzx rax, byte [rax]
+: gen-c@ ( -- )  $48 c, $0f c, $b6 c, $00 c, ;
 
 : gen-c! ( -- )
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $88 c, $18 c,                  \ mov [rax], bl
-  $49 c, $8b c, $47 c, 8 c,      \ mov rax, [r15+8]
-  $49 c, $83 c, $c7 c, 16 c, ;   \ add r15, 16
+  $49 c, $8b c, $1f c,
+  $88 c, $18 c,
+  $49 c, $8b c, $47 c, 8 c,
+  $49 c, $83 c, $c7 c, 16 c, ;
 
 \ ============================================================
 \ CONTROL FLOW
 \ ============================================================
 
 : gen-if ( -- orig )
-  \ TOS is condition; test and consume it, branch if zero
-  \ Save to rdi (pop-tos doesn't touch it)
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save TOS)
-  pop-tos                        \ load new TOS (consumes condition)
-  $48 c, $85 c, $ff c,           \ test rdi, rdi
-  $0f c, $84 c,                  \ jz rel32 (jump if was zero)
-  0 d,                           \ placeholder
-  code-here ;                    \ leave address for patching (after rel32)
+  $48 c, $89 c, $c7 c,
+  pop-tos
+  $48 c, $85 c, $ff c,
+  $0f c, $84 c,
+  0 d,
+  code-here ;
 
-\ Optimized compare+branch: skip flag conversion, use CPU flags directly
-\ These consume BOTH TOS and NOS (like < if combined)
 : gen-<if ( -- orig )
-  \ ( a b -- ) branch if NOT a<b (i.e., if a>=b)
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15] (NOS = a)
-  $48 c, $39 c, $c3 c,           \ cmp rbx, rax (cmp a, b)
-  $49 c, $8b c, $47 c, 8 c,      \ mov rax, [r15+8] (new TOS from under both)
-  $4d c, $8d c, $7f c, 16 c,     \ lea r15, [r15+16] (pop both) - no flag change!
-  $0f c, $8d c,                  \ jge rel32 (jump if a >= b)
+  $49 c, $8b c, $1f c,
+  $48 c, $39 c, $c3 c,
+  $49 c, $8b c, $47 c, 8 c,
+  $4d c, $8d c, $7f c, 16 c,
+  $0f c, $8d c,
   0 d,
   code-here ;
 
 : gen->if ( -- orig )
-  \ ( a b -- ) branch if NOT a>b (i.e., if a<=b)
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $48 c, $39 c, $c3 c,           \ cmp rbx, rax
-  $49 c, $8b c, $47 c, 8 c,      \ mov rax, [r15+8]
-  $4d c, $8d c, $7f c, 16 c,     \ lea r15, [r15+16]
-  $0f c, $8e c,                  \ jle rel32
+  $49 c, $8b c, $1f c,
+  $48 c, $39 c, $c3 c,
+  $49 c, $8b c, $47 c, 8 c,
+  $4d c, $8d c, $7f c, 16 c,
+  $0f c, $8e c,
   0 d,
   code-here ;
 
 : gen-=if ( -- orig )
-  \ ( a b -- ) branch if NOT a=b (i.e., if a<>b)
-  $49 c, $8b c, $1f c,           \ mov rbx, [r15]
-  $48 c, $39 c, $c3 c,           \ cmp rbx, rax
-  $49 c, $8b c, $47 c, 8 c,      \ mov rax, [r15+8]
-  $4d c, $8d c, $7f c, 16 c,     \ lea r15, [r15+16]
-  $0f c, $85 c,                  \ jne rel32
+  $49 c, $8b c, $1f c,
+  $48 c, $39 c, $c3 c,
+  $49 c, $8b c, $47 c, 8 c,
+  $4d c, $8d c, $7f c, 16 c,
+  $0f c, $85 c,
   0 d,
   code-here ;
 
 : gen-0<if ( -- orig )
-  \ ( n -- ) branch if NOT n<0 (i.e., if n>=0)
-  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $48 c, $85 c, $c0 c,
   pop-tos
-  $0f c, $89 c,                  \ jns rel32 (jump if NOT negative)
+  $0f c, $89 c,
   0 d,
   code-here ;
 
 : gen-0=if ( -- orig )
-  \ ( n -- ) branch if NOT n=0 (i.e., if n<>0)
-  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $48 c, $85 c, $c0 c,
   pop-tos
-  $0f c, $85 c,                  \ jne rel32 (jump if NOT zero)
+  $0f c, $85 c,
   0 d,
   code-here ;
 
 : gen-else ( orig1 -- orig2 )
-  \ Emit jmp to skip else clause (for when true branch taken)
-  $e9 c,                         \ jmp rel32
-  0 d,                           \ placeholder
-  code-here                      \ ( orig1 new-orig ) where new-orig = after placeholder
-  \ Patch if's jz to jump here (start of else clause)
-  tuck                           \ ( new-orig orig1 new-orig )
-  swap 4 -                       \ ( new-orig new-orig orig1-4 )
-  patch-rel32 ;                  \ ( new-orig )
+  $e9 c,
+  0 d,
+  code-here
+  tuck
+  swap 4 -
+  patch-rel32 ;
 
 : gen-then ( orig -- )
-  code-here swap 4 - patch-rel32 ;    \ patch jump to code-here
+  code-here swap 4 - patch-rel32 ;
 
-: gen-begin ( -- dest )
-  code-here ;
+: gen-begin ( -- dest )  code-here ;
 
 : gen-until ( dest -- )
-  \ Save condition to rdi, pop new TOS, then test
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save condition)
-  pop-tos                         \ get new TOS into rax
-  $48 c, $85 c, $ff c,           \ test rdi, rdi
-  $0f c, $84 c,                  \ jz rel32
+  $48 c, $89 c, $c7 c,
+  pop-tos
+  $48 c, $85 c, $ff c,
+  $0f c, $84 c,
   code-here 4 + - d, ;
 
 : gen-0=until ( dest -- )
-  \ Tight loop: exit when TOS=0, loop when TOS!=0
-  \ Replaces "dup 0= until" pattern - 5 ops instead of 12
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $95 c, $c1 c,           \ setnz cl (cl=1 if non-zero, keep looping)
-  pop-tos                         \ rax = new TOS
-  $84 c, $c9 c,                  \ test cl, cl
-  $0f c, $85 c,                  \ jnz rel32 (loop back if was non-zero)
+  $48 c, $85 c, $c0 c,
+  $0f c, $95 c, $c1 c,
+  pop-tos
+  $84 c, $c9 c,
+  $0f c, $85 c,
   code-here 4 + - d, ;
 
 : gen-nzloop ( dest -- )
-  \ Tightest loop: test TOS, loop if non-zero, keep TOS
-  \ Note: if preceded by 1- (dec), flags already set - but we test anyway
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $85 c,                  \ jnz rel32
+  $48 c, $85 c, $c0 c,
+  $0f c, $85 c,
   code-here 4 + - d, ;
 
 : gen-1-nzloop ( dest -- )
-  \ Check if loop body is empty (pure countdown)
   dup code-here = if
     drop
-    $31 c, $c0 c,                \ xor eax, eax (result is always 0)
+    $31 c, $c0 c,
     exit
   then
-  \ Check if loop body is just nos+ (3 bytes: inc rbx)
   dup code-here 3 - = if
     code-buf code-here 3 - + c@ $48 = if
     code-buf code-here 2 - + c@ $ff = if
     code-buf code-here 1 - + c@ $c3 = if
-      \ Pattern: begin nos+ 1-nzloop = NOS += TOS, TOS = 0
       drop
-      -3 code-pos +!             \ remove the nos+ (inc rbx)
-      $48 c, $01 c, $c3 c,       \ add rbx, rax (NOS += TOS)
-      $31 c, $c0 c,              \ xor eax, eax (TOS = 0)
+      -3 code-pos +!
+      $48 c, $01 c, $c3 c,
+      $31 c, $c0 c,
       exit
     then then then
   then
-  \ Peephole: 1- nzloop as single 2-instruction sequence
-  \ dec sets ZF, no test needed
-  $48 c, $ff c, $c8 c,           \ dec rax
-  $0f c, $85 c,                  \ jnz rel32
+  $48 c, $ff c, $c8 c,
+  $0f c, $85 c,
   code-here 4 + - d, ;
 
 : gen-while ( dest -- orig dest )
-  \ Save condition to rdi, pop new TOS, then test
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save condition)
-  pop-tos                         \ get new TOS into rax
-  $48 c, $85 c, $ff c,           \ test rdi, rdi
-  $0f c, $84 c,                  \ jz rel32
+  $48 c, $89 c, $c7 c,
+  pop-tos
+  $48 c, $85 c, $ff c,
+  $0f c, $84 c,
   0 d,
   code-here swap ;
 
 : gen-repeat ( orig dest -- )
-  $e9 c,                         \ jmp rel32 (backward to dest)
+  $e9 c,
   code-here 4 + - d,
-  code-here swap 4 - patch-rel32 ;    \ patch forward jump to code-here
+  code-here swap 4 - patch-rel32 ;
 
 : gen-again ( dest -- )
-  $e9 c,                         \ jmp rel32
+  $e9 c,
   code-here 4 + - d, ;
 
 \ ============================================================
 \ CALLS
 \ ============================================================
 
-variable call-nargs  1 call-nargs !  \ arg count of callee (set before gen-call)
+variable call-nargs  1 call-nargs !
+variable call-rets   1 call-rets !
 : gen-call ( addr -- )
-  \ Save registers above callee's arg count
-  stack-depth @ 3 >= call-nargs @ 3 < and if $51 c, then   \ push rcx
-  stack-depth @ 2 >= call-nargs @ 2 < and if $53 c, then   \ push rbx
-  $e8 c,                         \ call rel32
+  call-nargs @ 0= if push-tos 1 call-nargs ! then
+  stack-depth @ 3 >= call-nargs @ 3 < and if $51 c, then
+  stack-depth @ 2 >= call-nargs @ 2 < and if $53 c, then
+  $e8 c,
   code-here 4 + - d,
-  stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then   \ pop rbx
-  stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then   \ pop rcx
-  \ Adjust depth for multi-arg calls: consumed nargs, returned 1
-  call-nargs @ 2 = if
+  stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then
+  stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then
+  call-nargs @ 2 = call-rets @ 1 = and if
     stack-depth @ 3 >= if
-      $48 c, $89 c, $cb c,         \ mov rbx, rcx   ; shift saved 3rd down to NOS
+      $48 c, $89 c, $cb c,
       stack-depth @ 4 >= if
-        $49 c, $8b c, $0f c,       \ mov rcx, [r15]  ; reload 4th into 3rd
-        $49 c, $83 c, $c7 c, 8 c,  \ add r15, 8
+        $49 c, $8b c, $0f c,
+        $49 c, $83 c, $c7 c, 8 c,
       then
     then
     -1 stack-depth +!
@@ -640,98 +632,89 @@ variable call-nargs  1 call-nargs !  \ arg count of callee (set before gen-call)
 
 : gen-ret ( -- )
   do-depth @ 0 ?do
-    $41 c, $5d c,                \ pop r13         ; unwind do/loop frame
-    $41 c, $5c c,                \ pop r12
+    $41 c, $5d c,
+    $41 c, $5c c,
   loop
   $c3 c, ;
 
 \ ============================================================
-\ DO/LOOP (uses x86 stack as return stack)
+\ DO/LOOP
 \ ============================================================
 
-\ do ( limit index -- )  R: -- limit index
-\ Uses r12=index, r13=limit for speed. Push old values for nesting.
 : gen-do ( -- do-addr )
   1 do-depth +!
-  $41 c, $54 c,                  \ push r12        ; save outer index
-  $41 c, $55 c,                  \ push r13        ; save outer limit
-  $49 c, $89 c, $dd c,           \ mov r13, rbx    ; limit = NOS (always in rbx)
-  $49 c, $89 c, $c4 c,           \ mov r12, rax    ; index = TOS
-  \ Pop both limit and index (depth -= 2)
+  $41 c, $54 c,
+  $41 c, $55 c,
+  $49 c, $89 c, $dd c,
+  $49 c, $89 c, $c4 c,
   stack-depth @ 2 -
   dup 2 = if
-    \ depth was 4: rax=rcx, rbx=[r15], pop 1 cell
-    $48 c, $89 c, $c8 c,         \ mov rax, rcx
-    $49 c, $8b c, $1f c,         \ mov rbx, [r15]
-    $49 c, $83 c, $c7 c, 8 c,    \ add r15, 8
+    $48 c, $89 c, $c8 c,
+    $49 c, $8b c, $1f c,
+    $49 c, $83 c, $c7 c, 8 c,
   else dup 2 > if
-    \ depth was 5+: rax=rcx, rbx=[r15], rcx=[r15+8], pop 2 cells
-    $48 c, $89 c, $c8 c,         \ mov rax, rcx
-    $49 c, $8b c, $1f c,         \ mov rbx, [r15]
-    $49 c, $8b c, $4f c, 8 c,    \ mov rcx, [r15+8]
-    $49 c, $83 c, $c7 c, 16 c,   \ add r15, 16
+    $48 c, $89 c, $c8 c,
+    $49 c, $8b c, $1f c,
+    $49 c, $8b c, $4f c, 8 c,
+    $49 c, $83 c, $c7 c, 16 c,
   else dup 1 = if
-    \ depth was 3: rax=rcx
-    $48 c, $89 c, $c8 c,         \ mov rax, rcx
+    $48 c, $89 c, $c8 c,
   then then then
   stack-depth !
-  \ ?DO: skip loop when index = limit
-  $4d c, $39 c, $ec c,           \ cmp r12, r13
-  $0f c, $84 c,                  \ je rel32 (skip if equal)
-  0 d,                           \ placeholder
-  code-here cf-push              \ skip-patch address
-  code-here cf-push ;            \ loop-start address
+  $4d c, $39 c, $ec c,
+  $0f c, $84 c,
+  0 d,
+  code-here cf-push
+  code-here cf-push ;
 
-\ loop ( -- )  inc r12, cmp r13, jl back, then restore
 : gen-loop ( -- )
-  cf-pop                         \ loop-start
-  $49 c, $ff c, $c4 c,           \ inc r12
-  $4d c, $39 c, $ec c,           \ cmp r12, r13
-  $0f c, $8c c,                  \ jl rel32
-  code-here 4 + - d,             \ backward jump offset
-  cf-pop                         \ skip-patch
-  code-here swap 4 - patch-rel32 \ patch ?DO skip to here
-  $41 c, $5d c,                  \ pop r13         ; restore outer limit
-  $41 c, $5c c,                  \ pop r12         ; restore outer index
+  cf-pop
+  $49 c, $ff c, $c4 c,
+  $4d c, $39 c, $ec c,
+  $0f c, $8c c,
+  code-here 4 + - d,
+  cf-pop
+  code-here swap 4 - patch-rel32
+  $41 c, $5d c,
+  $41 c, $5c c,
   -1 do-depth +! ;
 
-\ +loop ( n -- )  R: limit index -- | limit index+n
 : gen-+loop ( -- )
-  cf-pop                         \ loop-start
-  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save step sign)
-  $49 c, $01 c, $c4 c,           \ add r12, rax    ; index += n
-  pop-tos                        \ get new TOS
-  $48 c, $85 c, $ff c,           \ test rdi, rdi
-  $78 c, 11 c,                   \ js +11 (to negative_step)
-  \ Positive step: continue if index < limit
-  $4d c, $39 c, $ec c,           \ cmp r12, r13
-  $0f c, $8c c,                  \ jl rel32
-  dup code-here 4 + - d,         \ backward to loop-start
-  $eb c, 9 c,                    \ jmp +9 (skip negative block)
-  \ Negative step: continue if index >= limit
-  $4d c, $39 c, $ec c,           \ cmp r12, r13
-  $0f c, $8d c,                  \ jge rel32
-  dup code-here 4 + - d,         \ backward to loop-start
-  drop                           \ discard loop-start
-  cf-pop                         \ skip-patch
-  code-here swap 4 - patch-rel32 \ patch ?DO skip to here
-  $41 c, $5d c,                  \ pop r13         ; restore outer limit
-  $41 c, $5c c,                  \ pop r12         ; restore outer index
+  cf-pop
+  $48 c, $89 c, $c7 c,
+  $49 c, $01 c, $c4 c,
+  pop-tos
+  $48 c, $85 c, $ff c,
+  $78 c, 11 c,
+  $4d c, $39 c, $ec c,
+  $0f c, $8c c,
+  dup code-here 4 + - d,
+  $eb c, 9 c,
+  $4d c, $39 c, $ec c,
+  $0f c, $8d c,
+  dup code-here 4 + - d,
+  drop
+  cf-pop
+  code-here swap 4 - patch-rel32
+  $41 c, $5d c,
+  $41 c, $5c c,
   -1 do-depth +! ;
 
-\ i ( -- index )  copy loop index to data stack
 : gen-i ( -- )
   push-tos
-  $4c c, $89 c, $e0 c, ;         \ mov rax, r12
+  $4c c, $89 c, $e0 c, ;
 
-\ j ( -- index )  outer loop index
 : gen-j ( -- )
   push-tos
-  $48 c, $8b c, $44 c, $24 c, 8 c, ;   \ mov rax, [rsp+8]  ; outer index
+  $48 c, $8b c, $44 c, $24 c, 8 c, ;
 
 \ ============================================================
 \ RECURSE
 \ ============================================================
+\ OPTIMIZATION 5: TAIL-CALL OPTIMIZATION.
+\ When recurse is the last word before ;, end-def patches the
+\ call instruction (e8) to a jmp (e9), eliminating stack frame overhead.
+\ tail-recurse records the code address of the last recurse call.
 
 variable current-word-addr  0 current-word-addr !
 
@@ -740,8 +723,7 @@ variable current-word-addr  0 current-word-addr !
   current-word-addr @ gen-call ;
 
 : gen-tail-recurse ( -- )
-  \ jmp instead of call - no stack frame
-  $e9 c,                         \ jmp rel32
+  $e9 c,
   current-word-addr @ code-here 4 + - d, ;
 
 variable tail-recurse  0 tail-recurse !
@@ -750,24 +732,19 @@ variable tail-recurse  0 tail-recurse !
 \ PROLOGUE / EPILOGUE
 \ ============================================================
 
-variable start-jmp  \ Address of jump-to-start placeholder
+variable start-jmp
 
 : gen-prologue ( -- )
-  \ Set up r15 as data stack (use area after code)
-  $49 c, $bf c, $400000 $8000 + q,  \ mov r15, 0x408000 (32KB into segment)
-  \ Jump forward to main call (patched later)
-  $e9 c, code-here start-jmp ! 0 d,      \ jmp rel32 (placeholder)
-  ;
+  $49 c, $bf c, $400000 $8000 + q,
+  $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )
-  \ Patch the start jump to current position
   code-here start-jmp @ patch-rel32 ;
 
 : gen-epilogue ( -- )
-  \ Exit syscall
-  $b8 c, 60 d,                   \ mov eax, 60
-  $31 c, $ff c,                  \ xor edi, edi
-  $0f c, $05 c, ;                \ syscall
+  $b8 c, 60 d,
+  $31 c, $ff c,
+  $0f c, $05 c, ;
 
 \ ============================================================
 \ PRINT NUMBER (for . word)
@@ -775,127 +752,111 @@ variable start-jmp  \ Address of jump-to-start placeholder
 
 : gen-dot ( -- )
   1 has-io !
-  stack-depth @ 3 >= if
-    $51 c,                       \ push rcx (save third stack element)
-  then
-  $45 c, $31 c, $c0 c,           \ xor r8d, r8d
-  \ Check for negative
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $79 c, 28 c,                   \ jns positive (+28 to skip neg handling)
-  $50 c,                         \ push rax
-  $b8 c, 1 d,                    \ mov eax, 1
-  $bf c, 1 d,                    \ mov edi, 1
-  $6a c, 45 c,                   \ push '-'
-  $48 c, $89 c, $e6 c,           \ mov rsi, rsp
-  $ba c, 1 d,                    \ mov edx, 1
-  $0f c, $05 c,                  \ syscall
-  $58 c,                         \ pop (minus sign)
-  $58 c,                         \ pop rax
-  $48 c, $f7 c, $d8 c,           \ neg rax
-  \ digit_loop: (jns lands here too)
-  code-here                      \ save digit_loop address
-  $48 c, $c7 c, $c1 c, 10 d,    \ mov rcx, 10 (64-bit)
-  $48 c, $31 c, $d2 c,           \ xor rdx, rdx
-  $48 c, $f7 c, $f1 c,           \ div rcx (64-bit)
-  $83 c, $c2 c, $30 c,           \ add edx, '0'
-  $52 c,                         \ push rdx
-  $41 c, $ff c, $c0 c,           \ inc r8d
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $75 c,                         \ jnz digit_loop
-  dup code-here 1+ - c,          \ compute relative offset (target - after_jnz)
+  stack-depth @ 3 >= if $51 c, then
+  $45 c, $31 c, $c0 c,
+  $48 c, $85 c, $c0 c,
+  $79 c, 28 c,
+  $50 c,
+  $b8 c, 1 d,
+  $bf c, 1 d,
+  $6a c, 45 c,
+  $48 c, $89 c, $e6 c,
+  $ba c, 1 d,
+  $0f c, $05 c,
+  $58 c,
+  $58 c,
+  $48 c, $f7 c, $d8 c,
+  code-here
+  $48 c, $c7 c, $c1 c, 10 d,
+  $48 c, $31 c, $d2 c,
+  $48 c, $f7 c, $f1 c,
+  $83 c, $c2 c, $30 c,
+  $52 c,
+  $41 c, $ff c, $c0 c,
+  $48 c, $85 c, $c0 c,
+  $75 c,
+  dup code-here 1+ - c,
   drop
-  \ print_loop:
-  code-here                      \ save print_loop address
-  $b8 c, 1 d,                    \ mov eax, 1
-  $bf c, 1 d,                    \ mov edi, 1
-  $48 c, $89 c, $e6 c,           \ mov rsi, rsp
-  $ba c, 1 d,                    \ mov edx, 1
-  $0f c, $05 c,                  \ syscall
-  $58 c,                         \ pop
-  $41 c, $ff c, $c8 c,           \ dec r8d
-  $75 c,                         \ jnz print_loop
-  dup code-here 1+ - c,          \ compute relative offset (target - after_jnz)
-  drop
-  \ space
-  $6a c, 32 c,                   \ push ' '
+  code-here
   $b8 c, 1 d,
   $bf c, 1 d,
   $48 c, $89 c, $e6 c,
   $ba c, 1 d,
   $0f c, $05 c,
   $58 c,
-  stack-depth @ 3 >= if
-    $59 c,                       \ pop rcx (restore third stack element)
-  then
+  $41 c, $ff c, $c8 c,
+  $75 c,
+  dup code-here 1+ - c,
+  drop
+  $6a c, 32 c,
+  $b8 c, 1 d,
+  $bf c, 1 d,
+  $48 c, $89 c, $e6 c,
+  $ba c, 1 d,
+  $0f c, $05 c,
+  $58 c,
+  stack-depth @ 3 >= if $59 c, then
   pop-tos ;
 
 : gen-cr ( -- )
   1 has-io !
-  $50 c,                         \ push rax  (save TOS)
-  stack-depth @ 2 >= if $53 c, then  \ push rbx if live
-  stack-depth @ 3 >= if $51 c, then  \ push rcx if live
-  $6a c, 10 c,                   \ push 10
-  $b8 c, 1 d,                    \ mov eax, 1  (write)
-  $bf c, 1 d,                    \ mov edi, 1  (stdout)
-  $48 c, $89 c, $e6 c,           \ mov rsi, rsp
-  $ba c, 1 d,                    \ mov edx, 1
-  $0f c, $05 c,                  \ syscall
-  $58 c,                         \ pop (newline)
-  stack-depth @ 3 >= if $59 c, then  \ pop rcx
-  stack-depth @ 2 >= if $5b c, then  \ pop rbx
-  $58 c, ;                       \ pop rax  (restore TOS)
+  $50 c,
+  stack-depth @ 2 >= if $53 c, then
+  stack-depth @ 3 >= if $51 c, then
+  $6a c, 10 c,
+  $b8 c, 1 d,
+  $bf c, 1 d,
+  $48 c, $89 c, $e6 c,
+  $ba c, 1 d,
+  $0f c, $05 c,
+  $58 c,
+  stack-depth @ 3 >= if $59 c, then
+  stack-depth @ 2 >= if $5b c, then
+  $58 c, ;
 
 : gen-emit ( -- )
   1 has-io !
-  stack-depth @ 2 >= if $53 c, then  \ push rbx if live
-  stack-depth @ 3 >= if $51 c, then  \ push rcx if live
-  $50 c,                         \ push rax (char)
-  $b8 c, 1 d,                    \ mov eax, 1
-  $bf c, 1 d,                    \ mov edi, 1
-  $48 c, $89 c, $e6 c,           \ mov rsi, rsp
-  $ba c, 1 d,                    \ mov edx, 1
-  $0f c, $05 c,                  \ syscall
-  $58 c,                         \ pop (char)
-  stack-depth @ 3 >= if $59 c, then  \ pop rcx
-  stack-depth @ 2 >= if $5b c, then  \ pop rbx
-  pop-tos ;                      \ consume the emitted char
+  stack-depth @ 2 >= if $53 c, then
+  stack-depth @ 3 >= if $51 c, then
+  $50 c,
+  $b8 c, 1 d,
+  $bf c, 1 d,
+  $48 c, $89 c, $e6 c,
+  $ba c, 1 d,
+  $0f c, $05 c,
+  $58 c,
+  stack-depth @ 3 >= if $59 c, then
+  stack-depth @ 2 >= if $5b c, then
+  pop-tos ;
 
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
 
-\ Static string storage. We allocate space for comparison strings.
-\ Format: length byte followed by characters
 here constant static-strings-start
-\ Leave 2KB for static strings
 2048 allot
 here constant static-strings-end
 static-strings-start constant str-ptr
 variable str-ptr-cur  static-strings-start str-ptr-cur !
 
-\ Store a string permanently in static area, return addr u
 : s, ( addr u -- static-addr u )
   dup str-ptr-cur @ + static-strings-end < invert if
     ." Static string overflow" cr 1 throw
   then
-  \ Stack: ( src-addr u )
-  dup >r                     \ save u
-  str-ptr-cur @ swap         \ ( src-addr dest-addr u )
-  move                       \ copy u bytes from src to dest
-  str-ptr-cur @ r>           \ ( dest-addr u )
-  dup str-ptr-cur +! ;       \ advance str-ptr-cur by u
+  dup >r
+  str-ptr-cur @ swap
+  move
+  str-ptr-cur @ r>
+  dup str-ptr-cur +! ;
 
-\ Compare strings (addr1 must be stable, addr2 can be transient)
 : str= ( addr1 u1 addr2 u2 -- flag )
   rot over <> if 2drop drop false exit then
-  ( addr1 addr2 u )
   begin
     dup 0= if drop 2drop true exit then
     >r over c@ over c@ <> if 2drop r> drop false exit then
     1+ swap 1+ swap r> 1-
   again ;
 
-\ Create all builtin word names as static strings
 s" dup" s, 2constant $dup
 s" dup2" s, 2constant $dup2
 s" drop" s, 2constant $drop
@@ -998,12 +959,10 @@ variable token-len
 : get-token ( -- addr u | 0 0 )
   skip-ws
   input-pos @ input-len @ >= if 0 0 exit then
-  \ Check for comment
   input-buf input-pos @ + c@ [char] \ = if
     skip-line
     recurse exit
   then
-  \ Check for ( comment
   input-buf input-pos @ + c@  [char] ( = if
     input-pos @ 1+ input-len @ < if
       input-buf input-pos @ 1+ + c@ 32 <= if
@@ -1049,7 +1008,6 @@ variable num-neg
     1 /string
   then
   dup 0= if 2drop false exit then
-  \ Check for hex $xx
   over c@ [char] $ = if
     1 /string
     dup 0= if 2drop false exit then
@@ -1076,7 +1034,6 @@ variable num-neg
     num-neg @ if num-val @ negate else num-val @ then
     true exit
   then
-  \ Decimal
   begin
     dup 0> while
     over c@
@@ -1098,89 +1055,134 @@ variable num-neg
 
 : install-builtins ( -- )
   s" dup" dict-add     ' gen-dup dict-entry 24 - dict-addr @ dict-entry 24 - dict-addr !
-  \ Can't store execution tokens this way - need different approach
   ;
 
-\ Emit a pending call (when result is used) then clear
 : flush-pending ( -- )
   pending-call @ ?dup if gen-call then
   0 pending-call ! ;
 
-\ Discard pending call without emitting (result unused)
 : discard-pending ( -- )
   0 pending-call ! ;
 
-\ Alternative: check each word directly using static strings
+\ OPTIMIZATION 1+2 dispatch: constant folding and literal-op fusion.
+\ For binary ops (+, -, *, and, or, xor):
+\   ct-depth >= 2 → fold both constants (pure compile-time eval)
+\   ct-depth == 1 → fuse: emit one x86 immediate instruction
+\   ct-depth == 0 → normal two-operand codegen
+\ For unary ops (negate, 1+, 1-, 2*, 2/, invert, abs):
+\   ct-depth >= 1 → fold the constant
+\   ct-depth == 0 → normal codegen
+\ For everything else: ct-flush first, then normal codegen.
 : compile-builtin ( addr u -- found? )
-  \ Only flush before ops that consume TOS - not push-only ops
-  2dup $dup str= if 2drop gen-dup true exit then
-  2dup $dup2 str= if 2drop gen-dup2 true exit then
-  2dup $drop str= if 2drop gen-drop true exit then
-  2dup $swap str= if 2drop gen-swap true exit then
-  2dup $over str= if 2drop gen-over true exit then
-  2dup $rot str= if 2drop gen-rot true exit then
-  2dup $nip str= if 2drop gen-nip true exit then
-  2dup $tuck str= if 2drop gen-tuck true exit then
-  2dup $2dup str= if 2drop gen-2dup true exit then
-  2dup $2drop str= if 2drop gen-2drop true exit then
-  2dup $+ str= if 2drop flush-pending gen-add true exit then
-  2dup $- str= if 2drop flush-pending gen-sub true exit then
-  2dup $* str= if 2drop flush-pending gen-mul true exit then
-  2dup $/ str= if 2drop flush-pending gen-div true exit then
-  2dup $mod str= if 2drop flush-pending gen-mod true exit then
-  2dup $negate str= if 2drop gen-negate true exit then
-  2dup $1+ str= if 2drop gen-1+ true exit then
-  2dup $1- str= if 2drop gen-1- true exit then
-  2dup $nos+ str= if 2drop gen-nos+ true exit then
-  2dup $2+ str= if 2drop gen-2+ true exit then
-  2dup $2- str= if 2drop gen-2- true exit then
-  2dup $tuck+ str= if 2drop gen-tuck+ true exit then
-  2dup $and str= if 2drop flush-pending gen-and true exit then
-  2dup $or str= if 2drop flush-pending gen-or true exit then
-  2dup $xor str= if 2drop flush-pending gen-xor true exit then
-  2dup $invert str= if 2drop gen-invert true exit then
-  2dup $abs str= if 2drop gen-abs true exit then
-  2dup $2* str= if 2drop gen-2* true exit then
-  2dup $2/ str= if 2drop gen-2/ true exit then
-  2dup $= str= if 2drop flush-pending gen-= true exit then
-  2dup $<> str= if 2drop flush-pending gen-<> true exit then
-  2dup $< str= if 2drop flush-pending gen-< true exit then
-  2dup $> str= if 2drop flush-pending gen-> true exit then
-  2dup $<= str= if 2drop flush-pending gen-<= true exit then
-  2dup $>= str= if 2drop flush-pending gen->= true exit then
-  2dup $0= str= if 2drop flush-pending gen-0= true exit then
-  2dup $0< str= if 2drop flush-pending gen-0< true exit then
-  2dup $0> str= if 2drop flush-pending gen-0> true exit then
-  2dup $@ str= if 2drop gen-@ true exit then
-  2dup $! str= if 2drop flush-pending gen-! true exit then
-  2dup $c@ str= if 2drop gen-c@ true exit then
-  2dup $c! str= if 2drop flush-pending gen-c! true exit then
-  2dup $. str= if 2drop flush-pending gen-dot true exit then
-  2dup $cr str= if 2drop gen-cr true exit then
-  2dup $emit str= if 2drop flush-pending gen-emit true exit then
-  2dup $if str= if 2drop flush-pending gen-if cf-push true exit then
-  2dup $<if str= if 2drop flush-pending gen-<if cf-push true exit then
-  2dup $>if str= if 2drop flush-pending gen->if cf-push true exit then
-  2dup $=if str= if 2drop flush-pending gen-=if cf-push true exit then
-  2dup $0<if str= if 2drop flush-pending gen-0<if cf-push true exit then
-  2dup $0=if str= if 2drop flush-pending gen-0=if cf-push true exit then
-  2dup $else str= if 2drop cf-pop gen-else cf-push true exit then
-  2dup $then str= if 2drop cf-pop gen-then true exit then
-  2dup $begin str= if 2drop gen-begin cf-push true exit then
-  2dup $until str= if 2drop flush-pending cf-pop gen-until true exit then
-  2dup $0=until str= if 2drop flush-pending cf-pop gen-0=until true exit then
-  2dup $nzloop str= if 2drop flush-pending cf-pop gen-nzloop true exit then
-  2dup $1-nzloop str= if 2drop flush-pending cf-pop gen-1-nzloop true exit then
-  2dup $while str= if 2drop flush-pending cf-pop gen-while cf-push cf-push true exit then
-  2dup $repeat str= if 2drop cf-pop cf-pop gen-repeat true exit then
-  2dup $again str= if 2drop cf-pop gen-again true exit then
-  2dup $do str= if 2drop flush-pending gen-do true exit then
-  2dup $loop str= if 2drop gen-loop true exit then
-  2dup $+loop str= if 2drop flush-pending gen-+loop true exit then
-  2dup $i str= if 2drop gen-i true exit then
-  2dup $j str= if 2drop gen-j true exit then
-  2dup $recurse str= if 2drop code-here tail-recurse ! gen-recurse true exit then
-  2dup $exit str= if 2drop gen-ret true exit then
+  \ ---- Stack manipulation: flush ct-stack first ----
+  2dup $dup str= if 2drop ct-flush gen-dup true exit then
+  2dup $dup2 str= if 2drop ct-flush gen-dup2 true exit then
+  2dup $drop str= if 2drop
+    ct-depth @ 0> if ct-pop drop else ct-flush gen-drop then
+    true exit then
+  2dup $swap str= if 2drop ct-flush gen-swap true exit then
+  2dup $over str= if 2drop ct-flush gen-over true exit then
+  2dup $rot str= if 2drop ct-flush gen-rot true exit then
+  2dup $nip str= if 2drop ct-flush gen-nip true exit then
+  2dup $tuck str= if 2drop ct-flush gen-tuck true exit then
+  2dup $2dup str= if 2drop ct-flush gen-2dup true exit then
+  2dup $2drop str= if 2drop ct-flush gen-2drop true exit then
+  \ ---- Binary arithmetic with fold/fuse ----
+  2dup $+ str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop + ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-add-imm
+    else flush-pending gen-add then then true exit then
+  2dup $- str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop swap - ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-sub-imm
+    else flush-pending gen-sub then then true exit then
+  2dup $* str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop * ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-mul-imm
+    else flush-pending gen-mul then then true exit then
+  2dup $/ str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop swap / ct-push
+    else ct-flush flush-pending gen-div then true exit then
+  2dup $mod str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop swap mod ct-push
+    else ct-flush flush-pending gen-mod then true exit then
+  \ ---- Unary arithmetic with fold ----
+  2dup $negate str= if 2drop
+    ct-depth @ 0> if ct-pop negate ct-push else gen-negate then true exit then
+  2dup $1+ str= if 2drop
+    ct-depth @ 0> if ct-pop 1+ ct-push else gen-1+ then true exit then
+  2dup $1- str= if 2drop
+    ct-depth @ 0> if ct-pop 1- ct-push else gen-1- then true exit then
+  2dup $nos+ str= if 2drop ct-flush gen-nos+ true exit then
+  2dup $2+ str= if 2drop
+    ct-depth @ 0> if ct-pop 2 + ct-push else gen-2+ then true exit then
+  2dup $2- str= if 2drop
+    ct-depth @ 0> if ct-pop 2 - ct-push else gen-2- then true exit then
+  2dup $tuck+ str= if 2drop ct-flush gen-tuck+ true exit then
+  \ ---- Bitwise with fold/fuse ----
+  2dup $and str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop and ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-and-imm
+    else flush-pending gen-and then then true exit then
+  2dup $or str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop or ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-or-imm
+    else flush-pending gen-or then then true exit then
+  2dup $xor str= if 2drop
+    ct-depth @ 2 >= if ct-pop ct-pop xor ct-push
+    else ct-depth @ 1 = if ct-pop flush-pending gen-xor-imm
+    else flush-pending gen-xor then then true exit then
+  2dup $invert str= if 2drop
+    ct-depth @ 0> if ct-pop invert ct-push else gen-invert then true exit then
+  2dup $abs str= if 2drop
+    ct-depth @ 0> if ct-pop abs ct-push else gen-abs then true exit then
+  2dup $2* str= if 2drop
+    ct-depth @ 0> if ct-pop 2 * ct-push else gen-2* then true exit then
+  2dup $2/ str= if 2drop
+    ct-depth @ 0> if ct-pop 2 / ct-push else gen-2/ then true exit then
+  \ ---- Comparison: flush, then normal ----
+  2dup $= str= if 2drop ct-flush flush-pending gen-= true exit then
+  2dup $<> str= if 2drop ct-flush flush-pending gen-<> true exit then
+  2dup $< str= if 2drop ct-flush flush-pending gen-< true exit then
+  2dup $> str= if 2drop ct-flush flush-pending gen-> true exit then
+  2dup $<= str= if 2drop ct-flush flush-pending gen-<= true exit then
+  2dup $>= str= if 2drop ct-flush flush-pending gen->= true exit then
+  2dup $0= str= if 2drop ct-flush flush-pending gen-0= true exit then
+  2dup $0< str= if 2drop ct-flush flush-pending gen-0< true exit then
+  2dup $0> str= if 2drop ct-flush flush-pending gen-0> true exit then
+  \ ---- Memory: flush, then normal ----
+  2dup $@ str= if 2drop ct-flush gen-@ true exit then
+  2dup $! str= if 2drop ct-flush flush-pending gen-! true exit then
+  2dup $c@ str= if 2drop ct-flush gen-c@ true exit then
+  2dup $c! str= if 2drop ct-flush flush-pending gen-c! true exit then
+  \ ---- I/O: flush, then normal ----
+  2dup $. str= if 2drop ct-flush flush-pending gen-dot true exit then
+  2dup $cr str= if 2drop ct-flush gen-cr true exit then
+  2dup $emit str= if 2drop ct-flush flush-pending gen-emit true exit then
+  \ ---- Control flow: flush, then normal ----
+  2dup $if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
+  2dup $<if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
+  2dup $>if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen->if cf-push true exit then
+  2dup $=if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-=if cf-push true exit then
+  2dup $0<if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-0<if cf-push true exit then
+  2dup $0=if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-0=if cf-push true exit then
+  2dup $else str= if 2drop ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
+  2dup $then str= if 2drop ct-flush cf-pop gen-then cf-pop stack-depth ! true exit then
+  2dup $begin str= if 2drop ct-flush gen-begin cf-push true exit then
+  2dup $until str= if 2drop ct-flush flush-pending cf-pop gen-until true exit then
+  2dup $0=until str= if 2drop ct-flush flush-pending cf-pop gen-0=until true exit then
+  2dup $nzloop str= if 2drop ct-flush flush-pending cf-pop gen-nzloop true exit then
+  2dup $1-nzloop str= if 2drop ct-flush flush-pending cf-pop gen-1-nzloop true exit then
+  2dup $while str= if 2drop ct-flush flush-pending cf-pop gen-while cf-push cf-push true exit then
+  2dup $repeat str= if 2drop ct-flush cf-pop cf-pop gen-repeat true exit then
+  2dup $again str= if 2drop ct-flush cf-pop gen-again true exit then
+  2dup $do str= if 2drop ct-flush flush-pending gen-do true exit then
+  2dup $loop str= if 2drop ct-flush gen-loop true exit then
+  2dup $+loop str= if 2drop ct-flush flush-pending gen-+loop true exit then
+  2dup $i str= if 2drop ct-flush gen-i true exit then
+  2dup $j str= if 2drop ct-flush gen-j true exit then
+  2dup $recurse str= if 2drop ct-flush code-here tail-recurse ! gen-recurse true exit then
+  2dup $exit str= if 2drop ct-flush gen-ret true exit then
   2drop false ;
 
 \ ============================================================
@@ -1189,42 +1191,164 @@ variable num-neg
 
 variable current-def  0 current-def !
 
+\ ============================================================
+\ WORD INFO TABLE (for double-pass forward reference resolution)
+\ ============================================================
+\ OPTIMIZATION 3: DOUBLE PASS infrastructure.
+\ Pass 1 (scan-all) walks the source and records every : definition's
+\ name, nargs (from stack comment), and flags (has-io, is-void).
+\ Pass 2 (compile-all) uses info-find to resolve forward references
+\ with correct nargs instead of defaulting to 1.
+\ Without this, calling a 2-arg word before its definition would
+\ generate wrong register save/restore code.
+\ Tests: 1030-fwd-ref-simple through 1033-fwd-ref-nargs, 1048-fwd-ref-void
+
+: info-entry ( i -- addr ) 32 * info-buf + ;
+: info-name= ( addr u entry -- flag )
+  >r dup 23 > if 2drop r> drop false exit then
+  r@ over + c@ 0 <> if r> drop 2drop false exit then
+  r> swap 0 ?do
+    2dup i + c@ swap i + c@ <> if 2drop false unloop exit then
+  loop 2drop true ;
+
+: info-find ( addr u -- entry | 0 )
+  info-count @ 0 ?do
+    2dup i info-entry info-name= if
+      2drop i info-entry unloop exit
+    then
+  loop
+  2drop 0 ;
+
+variable scan-nargs
+variable scan-void
+variable scan-io
+
+: scan-skip-ws ( -- )
+  begin
+    input-pos @ input-len @ >= if exit then
+    input-buf input-pos @ + c@ dup 32 <= swap 0 > and if
+      1 input-pos +!
+    else exit then
+  again ;
+
+: scan-stack-comment ( -- )
+  scan-skip-ws
+  input-pos @ input-len @ >= if exit then
+  input-buf input-pos @ + c@ [char] ( <> if exit then
+  input-pos @ 1+ input-len @ >= if exit then
+  input-buf input-pos @ 1+ + c@ 32 > if exit then
+  1 input-pos +!
+  1 scan-void !  0 scan-nargs !
+  0 >r
+  begin
+    scan-skip-ws
+    input-pos @ input-len @ >= if r> drop exit then
+    input-buf input-pos @ + c@
+    dup [char] ) = if drop r> drop 1 input-pos +! exit then
+    dup [char] - = if
+      input-pos @ 1+ input-len @ < if
+        input-buf input-pos @ 1+ + c@ [char] - = if
+          drop 2 input-pos +! r> drop 1 >r
+        else
+          begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
+          r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+        then
+      else
+        begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
+        r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+      then
+    else
+      drop
+      begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
+      r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+    then
+  again ;
+
+: scan-body-io ( -- )
+  0 scan-io !
+  begin
+    get-token dup 0= if 2drop exit then
+    2dup $; str= if 2drop exit then
+    2dup $. str= if 1 scan-io ! then
+    2dup $cr str= if 1 scan-io ! then
+    2dup $emit str= if 1 scan-io ! then
+    2drop
+  again ;
+
+create scan-name-buf 24 allot
+variable scan-name-len
+
+: scan-add-info ( -- )
+  info-count @ INFO-MAX >= if exit then
+  info-count @ info-entry >r
+  r@ 24 0 fill
+  scan-name-buf r@ scan-name-len @ dup 23 > if drop 23 then move
+  scan-nargs @ 1 max r@ 24 + !
+  scan-io @ 1 lshift
+  scan-void @ 0= if 4 or then
+  r> 28 + !
+  1 info-count +! ;
+
+: scan-all ( -- )
+  0 info-count !
+  begin
+    get-token dup 0= if 2drop exit then
+    2dup $: str= if
+      2drop
+      get-token dup 0= if 2drop exit then
+      dup scan-name-len !
+      dup 23 > if drop 23 then
+      scan-name-buf over 0 fill
+      scan-name-buf swap move
+      1 scan-void !  1 scan-nargs !  0 scan-io !
+      scan-stack-comment
+      scan-body-io
+      scan-add-info
+    else
+      2drop
+    then
+  again ;
+
 : compile-token ( addr u -- )
-  0 tail-recurse !                 \ clear tail-recurse (set by recurse if in tail position)
-  \ Try as builtin
+  0 tail-recurse !
   2dup compile-builtin if 2drop exit then
-  \ Try as number
   2dup parse-number if
-    \ Stack: addr u n (after if consumed true)
-    nip nip     \ n
-    gen-lit exit
+    nip nip
+    ct-push exit
   then
-  \ Try as user word
+  ct-flush
   2dup dict-find ?dup if
     nip nip
-    \ DCE: eliminate calls to finalized pure-void words
-    \ Flags=0 means word is still being compiled (not yet finalized by end-def)
     dup dict-flags @ ?dup if
-      dup 2 and 0=                  \ pure? (no I/O)
-      swap 4 and 0= and if          \ and void? (no return)
-        drop exit                   \ eliminate the call entirely
+      dup 2 and 0=
+      swap 4 and 0= and if
+        drop exit
       then
     then
-    \ Set callee arg count for gen-call save/restore
-    dup dict-flags @ dup if 3 rshift $F and else drop arg-count @ then
-    call-nargs !
+    dup dict-flags @ dup if
+      dup 3 rshift $F and call-nargs !
+      7 rshift $F and call-rets !
+    else
+      drop arg-count @ call-nargs !
+      1 call-rets !
+    then
     dict-addr @ gen-call exit
   then
-  \ Forward reference: emit call with placeholder, record fixup
-  1 call-nargs !
-  $e8 c,                         \ call rel32
-  0 d,                           \ placeholder offset
+  2dup info-find ?dup if
+    dup 24 + @ call-nargs !
+    1 call-rets !
+    drop
+  else
+    1 call-nargs !  1 call-rets !
+  then
+  $e8 c,
+  0 d,
   code-here add-fixup ;
 
-variable is-void  0 is-void !   \ set by ( -- ) comment
+variable is-void  0 is-void !
+variable ret-count 1 ret-count !
 
 : skip-ws-only ( -- )
-  \ Skip whitespace without skipping comments
   begin
     input-pos @ input-len @ >= if exit then
     input-buf input-pos @ + c@ dup 32 <= swap 0 > and if
@@ -1233,19 +1357,16 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
   again ;
 
 : parse-stack-comment ( -- )
-  \ Peek at raw input to find ( ... -- ... ) pattern
-  \ get-token would skip it as a comment!
   skip-ws-only
   input-pos @ input-len @ >= if exit then
   input-buf input-pos @ + c@ [char] ( <> if exit then
-  \ Check if ( is followed by whitespace (stack comment) or not (word like "(foo")
   input-pos @ 1+ input-len @ >= if exit then
   input-buf input-pos @ 1+ + c@ 32 > if exit then
-  \ It's a stack comment - parse it manually
-  1 input-pos +!                 \ skip (
-  1 is-void !                    \ assume void
-  0 arg-count !                  \ count input args
-  0 >r                           \ r: saw-dashdash
+  1 input-pos +!
+  1 is-void !
+  0 arg-count !
+  0 ret-count !
+  0 >r
   begin
     skip-ws-only
     input-pos @ input-len @ >= if r> drop exit then
@@ -1256,46 +1377,46 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
         input-buf input-pos @ 1+ + c@ [char] - = if
           drop 2 input-pos +! r> drop 1 >r
         else
-          \ Single -, it's a stack item
           begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-          r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
+          r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
         then
       else
         begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-        r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
+        r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
       then
     else
       drop
-      \ Skip token
       begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-      r> dup if 0 is-void ! then dup 0= if drop 1 arg-count +! 0 then >r
+      r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
     then
   again ;
 
 : start-def ( addr u -- )
+  0 ct-depth !
   dict-add
   code-here current-word-addr !
   0 has-io !
-  0 is-void !                  \ default NOT void (safe for DCE), stack comment overrides
-  0 do-depth !                  \ reset do/loop nesting
-  1 arg-count !                 \ default 1 arg, stack comment overrides
+  0 is-void !
+  0 do-depth !
+  1 arg-count !
+  1 ret-count !
   parse-stack-comment
   arg-count @ 1 max stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
 : end-def ( -- )
+  ct-flush
   tail-recurse @ ?dup if
-    \ Patch call (e8) to jmp (e9) - tail call optimization
     code-buf + $e9 swap c!
     0 tail-recurse !
   else
     gen-ret
   then
-  \ Store flags: bit1=has-io, bit2=has-return, bits3-6=arg-count
-  has-io @ 1 lshift                         \ bit 1 = has-io
-  is-void @ 0= if 4 or then                 \ bit 2 = has return (not void)
-  arg-count @ 3 lshift or                   \ bits 3-6 = arg count
+  has-io @ 1 lshift
+  is-void @ 0= if 4 or then
+  arg-count @ 3 lshift or
+  ret-count @ 7 lshift or
   dict-buf dict-count @ 1- 32 * + dict-flags !
   0 state ! ;
 
@@ -1312,7 +1433,6 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
   state @ if
     compile-token
   else
-    \ Interpret mode - only allow definitions
     ." Unexpected token in interpret mode: " type cr
     1 throw
   then ;
@@ -1329,33 +1449,36 @@ variable is-void  0 is-void !   \ set by ( -- ) comment
 \ ============================================================
 
 : load-file ( addr u -- )
-  slurp-file              \ -- addr u
+  slurp-file
   dup INPUT-SIZE > if
     ." File too large" cr 1 throw
   then
   dup input-len !
-  input-buf swap move     \ copy to input-buf
+  input-buf swap move
   0 input-pos ! ;
 
 : compile-file ( src-addr src-u out-addr out-u -- )
   2swap load-file
+  scan-all
+  0 input-pos !
   0 code-pos !
   0 dict-count !
   0 cf-sp !
   0 state !
+  0 fixup-count !
+  0 ct-depth !
   gen-prologue
-  compile-all               \ compile user's code (defines main etc)
-  patch-start               \ patch forward jump to code-here (after all compiled words)
-  $main dict-find           \ find user's main
+  compile-all
+  patch-start
+  $main dict-find
   ?dup if
-    dict-addr @ gen-call    \ call it
+    dict-addr @ gen-call
   then
   gen-cr
   gen-epilogue
   elf-header
   write-elf ;
 
-\ Persistent string buffers (s" is transient, reuses same buffer)
 create src-name 64 allot
 variable src-len
 create out-name 64 allot
@@ -1365,9 +1488,6 @@ variable out-len
 : save-out ( addr u -- ) dup out-len ! out-name swap move ;
 : get-src ( -- addr u ) src-name src-len @ ;
 : get-out ( -- addr u ) out-name out-len @ ;
-
-\ Entry point - compile file from command line
-\ Usage: fifth tf.fs input.fs output
 
 create cmd-buf 128 allot
 
