@@ -271,17 +271,9 @@ variable fixup-target  0 fixup-target !
 
 : gen-rot ( -- )
   \ a b c -- b c a
-  stack-depth @ 3 = if
-    \ depth=3: rcx=a, rbx=b, rax=c. Want: rcx=b, rbx=c, rax=a
-    $48 c, $87 c, $c1 c,         \ xchg rax, rcx (now rax=a, rcx=c)
-    $48 c, $87 c, $cb c,         \ xchg rbx, rcx (now rbx=c, rcx=b)
-  else
-    \ depth>3: [r15]=a, rbx=b, rax=c. Memory fallback
-    $49 c, $8b c, $0f c,         \ mov rcx, [r15]     ; a
-    $49 c, $89 c, $1f c,         \ mov [r15], rbx     ; store b
-    $48 c, $89 c, $c3 c,         \ mov rbx, rax       ; b = c
-    $48 c, $89 c, $c8 c,         \ mov rax, rcx       ; TOS = a
-  then ;
+  \ Top 3 always in rax/rbx/rcx for depth>=3
+  $48 c, $87 c, $c1 c,         \ xchg rax, rcx (now rax=a, rcx=c)
+  $48 c, $87 c, $cb c, ;       \ xchg rbx, rcx (now rbx=c, rcx=b)
 
 : gen-nip ( -- )  \ a b -- b
   \ Drop NOS, keep TOS. Same as pop-nos but without a binary op result.
@@ -634,7 +626,17 @@ variable call-nargs  1 call-nargs !  \ arg count of callee (set before gen-call)
   code-here 4 + - d,
   stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then   \ pop rbx
   stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then   \ pop rcx
-  ;
+  \ Adjust depth for multi-arg calls: consumed nargs, returned 1
+  call-nargs @ 2 = if
+    stack-depth @ 3 >= if
+      $48 c, $89 c, $cb c,         \ mov rbx, rcx   ; shift saved 3rd down to NOS
+      stack-depth @ 4 >= if
+        $49 c, $8b c, $0f c,       \ mov rcx, [r15]  ; reload 4th into 3rd
+        $49 c, $83 c, $c7 c, 8 c,  \ add r15, 8
+      then
+    then
+    -1 stack-depth +!
+  then ;
 
 : gen-ret ( -- )
   do-depth @ 0 ?do
@@ -673,25 +675,46 @@ variable call-nargs  1 call-nargs !  \ arg count of callee (set before gen-call)
     $48 c, $89 c, $c8 c,         \ mov rax, rcx
   then then then
   stack-depth !
-  code-here ;                    \ leave loop start address
+  \ ?DO: skip loop when index = limit
+  $4d c, $39 c, $ec c,           \ cmp r12, r13
+  $0f c, $84 c,                  \ je rel32 (skip if equal)
+  0 d,                           \ placeholder
+  code-here cf-push              \ skip-patch address
+  code-here cf-push ;            \ loop-start address
 
 \ loop ( -- )  inc r12, cmp r13, jl back, then restore
-: gen-loop ( do-addr -- )
+: gen-loop ( -- )
+  cf-pop                         \ loop-start
   $49 c, $ff c, $c4 c,           \ inc r12
   $4d c, $39 c, $ec c,           \ cmp r12, r13
   $0f c, $8c c,                  \ jl rel32
-  code-here 4 + - d,             \ backward jump offset: do-addr - (here+4)
+  code-here 4 + - d,             \ backward jump offset
+  cf-pop                         \ skip-patch
+  code-here swap 4 - patch-rel32 \ patch ?DO skip to here
   $41 c, $5d c,                  \ pop r13         ; restore outer limit
   $41 c, $5c c,                  \ pop r12         ; restore outer index
   -1 do-depth +! ;
 
 \ +loop ( n -- )  R: limit index -- | limit index+n
-: gen-+loop ( do-addr -- )
+: gen-+loop ( -- )
+  cf-pop                         \ loop-start
+  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save step sign)
   $49 c, $01 c, $c4 c,           \ add r12, rax    ; index += n
   pop-tos                        \ get new TOS
+  $48 c, $85 c, $ff c,           \ test rdi, rdi
+  $78 c, 11 c,                   \ js +11 (to negative_step)
+  \ Positive step: continue if index < limit
   $4d c, $39 c, $ec c,           \ cmp r12, r13
   $0f c, $8c c,                  \ jl rel32
-  code-here 4 + - d,             \ backward jump offset
+  dup code-here 4 + - d,         \ backward to loop-start
+  $eb c, 9 c,                    \ jmp +9 (skip negative block)
+  \ Negative step: continue if index >= limit
+  $4d c, $39 c, $ec c,           \ cmp r12, r13
+  $0f c, $8d c,                  \ jge rel32
+  dup code-here 4 + - d,         \ backward to loop-start
+  drop                           \ discard loop-start
+  cf-pop                         \ skip-patch
+  code-here swap 4 - patch-rel32 \ patch ?DO skip to here
   $41 c, $5d c,                  \ pop r13         ; restore outer limit
   $41 c, $5c c,                  \ pop r12         ; restore outer index
   -1 do-depth +! ;
@@ -1151,9 +1174,9 @@ variable num-neg
   2dup $while str= if 2drop flush-pending cf-pop gen-while cf-push cf-push true exit then
   2dup $repeat str= if 2drop cf-pop cf-pop gen-repeat true exit then
   2dup $again str= if 2drop cf-pop gen-again true exit then
-  2dup $do str= if 2drop flush-pending gen-do cf-push true exit then
-  2dup $loop str= if 2drop cf-pop gen-loop true exit then
-  2dup $+loop str= if 2drop flush-pending cf-pop gen-+loop true exit then
+  2dup $do str= if 2drop flush-pending gen-do true exit then
+  2dup $loop str= if 2drop gen-loop true exit then
+  2dup $+loop str= if 2drop flush-pending gen-+loop true exit then
   2dup $i str= if 2drop gen-i true exit then
   2dup $j str= if 2drop gen-j true exit then
   2dup $recurse str= if 2drop code-here tail-recurse ! gen-recurse true exit then
