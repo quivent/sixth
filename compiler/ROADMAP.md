@@ -33,6 +33,21 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 | tf.fs/gcc-O2 speed ratio | 0.88x | > 0.80x |
 | Correctness | 976/1050 (93%) | >= 976/1050 |
 
+### Headline Speedups: Native vs Interpreter (protect these)
+
+Heavy-iteration benchmarks in `bench/`. These measure the full compiler payoff.
+
+| Benchmark | Interpreted | Native | gcc -O2 | vs Interp | vs gcc |
+|-----------|------------|--------|---------|-----------|--------|
+| **branch** (10M if/else) | 435ms | 9ms | 9ms | **48x** | 1.0x |
+| **arith** (100M do-loop acc) | 1371ms | 37ms | 1ms* | **37x** | 37x slow |
+| **stack** (10M swap in do) | 92ms | 3ms | 5ms | **31x** | 1.7x fast |
+| **nested** (1M nested do) | 13ms | 2ms | 1ms* | **6.5x** | 2x slow |
+
+\* gcc -O2 recognizes sum/count patterns and computes at compile time.
+
+Branch and stack are the clean wins — tf.fs matches or beats gcc-O2 while being 30-48x faster than interpreted. Arith and nested lose to gcc-O2 because gcc replaces the loop entirely with a closed-form constant.
+
 ### Per-Optimization Anchors (sustain these individually)
 
 | Optimization | Key Test | tf/gcc-O2 | Floor |
