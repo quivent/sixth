@@ -8,7 +8,7 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 
 | Source | Words | Notes |
 |--------|-------|-------|
-| tf.fs compiled | 71 | 59 standard + 12 custom |
+| tf.fs compiled | 105 | 93 standard + 12 custom |
 | ANS Forth Core | ~180 | tf.fs covers 33% |
 | Fifth interpreter | ~480 | 178 C prims + 15 boot + 302 lib |
 
@@ -19,8 +19,12 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 **Logic**: `and` `or` `xor` `invert`
 **Stack**: `dup` `drop` `swap` `over` `rot` `nip` `tuck` `2dup` `2drop` `2swap` `2over` `?dup` `depth` `pick`
 **Control**: `if` `else` `then` `begin` `until` `begin` `while` `repeat` `do` `loop` `+loop` `i` `j` `leave` `recurse` `exit`
-**I/O**: `.` `emit` `cr` `type` `." ..."`
-**Custom**: `nos+` `nos-` `tuck+` `dup+` `dup-` `<if` `1-nzloop` `dup2` `0<if` `0=if` `0<>if` `s"`
+**Memory**: `@` `!` `c@` `c!` `+!` `cells` `cell+` `variable` `constant` `create` `allot` `here`
+**Return Stack**: `>r` `r>` `r@` `2>r` `2r>` `2r@`
+**I/O**: `.` `emit` `cr` `type` `." ..."` `s"`
+**Extra Ops**: `min` `max` `lshift` `rshift`
+**Double-Cell**: `s>d` `um*` `m*` `um/mod` `sm/rem` `fm/mod` `d+` `d-`
+**Custom**: `nos+` `nos-` `tuck+` `dup+` `dup-` `<if` `1-nzloop` `dup2` `0<if` `0=if` `0<>if`
 
 ### Performance Anchors (sustain these)
 
@@ -31,7 +35,7 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 | tf.fs avg runtime | 1.4ms | < 2.0ms |
 | gcc-O2 avg runtime | 1.6ms | (reference) |
 | tf.fs/gcc-O2 speed ratio | 0.88x | > 0.80x |
-| Correctness | 976/1050 (93%) | >= 976/1050 |
+| Correctness | 999/1050 (95%) | >= 999/1050 |
 
 ### Headline Speedups: Native vs Interpreter (protect these)
 
@@ -87,7 +91,7 @@ uses `nos+` (single `inc rbx` instruction) in a tight loop.
 ./fifth compiler/regress.fs
 ```
 
-Current baseline: 993 pass, 54 fail (44 unimplemented optimization tests, 8 multi-line output format, 2 actual bugs), 3 skip.
+Current baseline: 999 pass, 51 skip. Phases 1-4 complete: return stack, memory/defining words, trivial ops, strings. call/fibrec benchmarks fixed (tail-call patch was overwriting register saves instead of call opcode).
 
 ## Phase 1: Return Stack
 

@@ -65,8 +65,13 @@ variable dict-count  0 dict-count !
 create cf-stack 64 cells allot
 variable cf-sp  0 cf-sp !
 
+\ Data segment allocation (variables, create/allot)
+$40A000 constant DATA-BASE
+variable data-here  DATA-BASE data-here !
+
 \ Compilation state
 variable state  0 state !   \ 0=interpret, 1=compile
+variable interp-val  0 interp-val !
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 
 \ OPTIMIZATION 6: REGISTER-BASED STACK
@@ -461,6 +466,159 @@ variable nos+-pending  0 nos+-pending !
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
+: gen-min ( -- )
+  \ ( a b -- min ) b=rax, a=rbx. cmp rbx,rax; cmovl rax,rbx
+  $48 c, $39 c, $c3 c,
+  $48 c, $0f c, $4c c, $c3 c,
+  pop-nos ;
+
+: gen-max ( -- )
+  \ ( a b -- max ) b=rax, a=rbx. cmp rbx,rax; cmovg rax,rbx
+  $48 c, $39 c, $c3 c,
+  $48 c, $0f c, $4f c, $c3 c,
+  pop-nos ;
+
+: gen-lshift ( -- )
+  \ ( value count -- result ) count=rax, value=rbx
+  $48 c, $89 c, $c1 c,
+  $48 c, $89 c, $d8 c,
+  $48 c, $d3 c, $e0 c,
+  -1 stack-depth +! ;
+
+: gen-rshift ( -- )
+  \ ( value count -- result ) count=rax, value=rbx
+  $48 c, $89 c, $c1 c,
+  $48 c, $89 c, $d8 c,
+  $48 c, $d3 c, $e8 c,
+  -1 stack-depth +! ;
+
+\ ============================================================
+\ DOUBLE-CELL AND UNSIGNED
+\ ============================================================
+
+: gen-s>d ( -- )
+  \ ( n -- d ) sign-extend: push rax, then rax = rax >> 63
+  push-tos
+  $48 c, $89 c, $c3 c,             \ mov rbx, rax  (copy n to NOS)
+  $48 c, $c1 c, $f8 c, 63 c, ;    \ sar rax, 63   (TOS = sign: 0 or -1)
+
+: gen-um* ( -- )
+  \ ( u1 u2 -- ud ) u2=rax, u1=rbx → rdx:rax = rax*rbx
+  \ Result: low in rbx (NOS), high in rax (TOS) — double on stack as ( low high )
+  $48 c, $f7 c, $e3 c,             \ mul rbx  → rdx:rax
+  $48 c, $89 c, $c3 c,             \ mov rbx, rax  (low → NOS)
+  $48 c, $89 c, $d0 c, ;           \ mov rax, rdx  (high → TOS)
+
+: gen-m* ( -- )
+  \ ( n1 n2 -- d ) n2=rax, n1=rbx → rdx:rax = rax*rbx (signed)
+  $48 c, $f7 c, $eb c,             \ imul rbx → rdx:rax
+  $48 c, $89 c, $c3 c,             \ mov rbx, rax  (low → NOS)
+  $48 c, $89 c, $d0 c, ;           \ mov rax, rdx  (high → TOS)
+
+: gen-um/mod ( -- )
+  \ ( udlo udhi u1 -- ur uq ) u1=rax, udhi=rbx, udlo=3rd
+  \ x86 div: rdx:rax / reg → rax=quot, rdx=rem
+  \ Strategy: use x86 stack to shuffle registers
+  $50 c,                            \ push rax (save divisor)
+  $48 c, $89 c, $da c,             \ mov rdx, rbx (udhi → rdx)
+  \ Load udlo into rax from 3rd stack position
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,           \ mov rax, rcx (3rd reg → rax = udlo)
+  else
+    \ udlo on r15 memory stack
+    $49 c, $8b c, $07 c,           \ mov rax, [r15]
+    $49 c, $83 c, $c7 c, 8 c,     \ add r15, 8
+  then
+  $59 c,                            \ pop rcx (divisor → rcx)
+  $48 c, $f7 c, $f1 c,             \ div rcx → rax=quot, rdx=rem
+  \ Result: ( rem quot ) — rem in NOS, quot in TOS
+  $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
+  \ rax already has quotient (TOS)
+  -1 stack-depth +! ;              \ consumed 3, produced 2
+
+: gen-sm/rem ( -- )
+  \ ( dlo dhi n -- rem quot ) signed symmetric division
+  \ x86 idiv does symmetric (truncate toward zero) — exactly sm/rem
+  $50 c,                            \ push rax (save divisor)
+  $48 c, $89 c, $da c,             \ mov rdx, rbx (dhi → rdx)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,           \ mov rax, rcx (3rd reg → rax = dlo)
+  else
+    $49 c, $8b c, $07 c,           \ mov rax, [r15]
+    $49 c, $83 c, $c7 c, 8 c,     \ add r15, 8
+  then
+  $59 c,                            \ pop rcx (divisor → rcx)
+  $48 c, $f7 c, $f9 c,             \ idiv rcx → rax=quot, rdx=rem
+  $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
+  -1 stack-depth +! ;
+
+: gen-fm/mod ( -- )
+  \ ( dlo dhi n -- rem quot ) floored division
+  \ Floored: if rem != 0 and rem sign differs from divisor, adjust:
+  \   rem += divisor, quot -= 1
+  \ Strategy: emit idiv, then a conditional fixup
+  $50 c,                            \ push rax (save divisor)
+  $48 c, $89 c, $da c,             \ mov rdx, rbx (dhi → rdx)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,           \ mov rax, rcx
+  else
+    $49 c, $8b c, $07 c,
+    $49 c, $83 c, $c7 c, 8 c,
+  then
+  $59 c,                            \ pop rcx (divisor → rcx)
+  $48 c, $f7 c, $f9 c,             \ idiv rcx → rax=quot, rdx=rem
+  \ Fixup: if rdx != 0 && (rdx ^ rcx) < 0 then rdx+=rcx, rax-=1
+  $48 c, $85 c, $d2 c,             \ test rdx, rdx
+  $74 c, 15 c,                     \ jz +15 (skip fixup if rem=0)
+  $48 c, $89 c, $d6 c,             \ mov rsi, rdx
+  $48 c, $31 c, $ce c,             \ xor rsi, rcx
+  $48 c, $85 c, $f6 c,             \ test rsi, rsi
+  $7d c, 6 c,                      \ jge +6 (skip if same sign)
+  $48 c, $01 c, $ca c,             \ add rdx, rcx
+  $48 c, $ff c, $c8 c,             \ dec rax
+  \ Result: ( rem quot )
+  $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
+  -1 stack-depth +! ;
+
+: gen-d+ ( -- )
+  \ ( d1lo d1hi d2lo d2hi -- dlo dhi )
+  \ d2hi=rax, d2lo=rbx, d1hi=3rd, d1lo=4th
+  \ add with carry: d1lo+d2lo → low, d1hi+d2hi+carry → high
+  \ Use x86 stack for register shuffling
+  $48 c, $89 c, $c2 c,             \ mov rdx, rax (d2hi → rdx)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,           \ mov rax, rcx (d1hi → rax)
+  else
+    $49 c, $8b c, $07 c,           \ mov rax, [r15]
+    $49 c, $83 c, $c7 c, 8 c,     \ add r15, 8
+  then
+  \ Now need d1lo — it's 4th item (on r15 stack regardless)
+  $49 c, $8b c, $0f c,             \ mov rcx, [r15] (d1lo)
+  $49 c, $83 c, $c7 c, 8 c,       \ add r15, 8
+  \ rcx=d1lo, rbx=d2lo, rax=d1hi, rdx=d2hi
+  $48 c, $01 c, $d9 c,             \ add rcx, rbx  (low = d1lo + d2lo)
+  $48 c, $11 c, $d0 c,             \ adc rax, rdx  (high = d1hi + d2hi + carry)
+  $48 c, $89 c, $cb c,             \ mov rbx, rcx  (low → NOS)
+  \ rax = high (TOS)
+  -2 stack-depth +! ;              \ consumed 4, produced 2
+
+: gen-d- ( -- )
+  \ ( d1lo d1hi d2lo d2hi -- dlo dhi )
+  $48 c, $89 c, $c2 c,             \ mov rdx, rax (d2hi)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,           \ mov rax, rcx (d1hi)
+  else
+    $49 c, $8b c, $07 c,
+    $49 c, $83 c, $c7 c, 8 c,
+  then
+  $49 c, $8b c, $0f c,             \ mov rcx, [r15] (d1lo)
+  $49 c, $83 c, $c7 c, 8 c,       \ add r15, 8
+  \ rcx=d1lo, rbx=d2lo, rax=d1hi, rdx=d2hi
+  $48 c, $29 c, $d9 c,             \ sub rcx, rbx  (low = d1lo - d2lo)
+  $48 c, $19 c, $d0 c,             \ sbb rax, rdx  (high = d1hi - d2hi - borrow)
+  $48 c, $89 c, $cb c,             \ mov rbx, rcx
+  -2 stack-depth +! ;
+
 \ ============================================================
 \ MEMORY
 \ ============================================================
@@ -468,18 +626,88 @@ variable nos+-pending  0 nos+-pending !
 : gen-@ ( -- )  $48 c, $8b c, $00 c, ;
 
 : gen-! ( -- )
-  $49 c, $8b c, $1f c,
+  \ ( value addr -- ) addr=rax, value=rbx
   $48 c, $89 c, $18 c,
-  $49 c, $8b c, $47 c, 8 c,
-  $49 c, $83 c, $c7 c, 16 c, ;
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,
+    stack-depth @ 4 >= if
+      $49 c, $8b c, $0f c,
+      $49 c, $83 c, $c7 c, 8 c,
+    then
+  then
+  -2 stack-depth +! ;
 
 : gen-c@ ( -- )  $48 c, $0f c, $b6 c, $00 c, ;
 
 : gen-c! ( -- )
-  $49 c, $8b c, $1f c,
+  \ ( char addr -- ) addr=rax, char=rbx
   $88 c, $18 c,
-  $49 c, $8b c, $47 c, 8 c,
-  $49 c, $83 c, $c7 c, 16 c, ;
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,
+    stack-depth @ 4 >= if
+      $49 c, $8b c, $0f c,
+      $49 c, $83 c, $c7 c, 8 c,
+    then
+  then
+  -2 stack-depth +! ;
+
+: gen-+! ( -- )
+  \ ( n addr -- ) addr=rax, n=rbx
+  $48 c, $01 c, $18 c,
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,
+    stack-depth @ 4 >= if
+      $49 c, $8b c, $0f c,
+      $49 c, $83 c, $c7 c, 8 c,
+    then
+  then
+  -2 stack-depth +! ;
+
+: gen-cells ( -- )
+  \ ( n -- n*8 ) shl rax, 3
+  $48 c, $c1 c, $e0 c, 3 c, ;
+
+: gen-cell+ ( -- )
+  \ ( addr -- addr+8 ) add rax, 8
+  $48 c, $83 c, $c0 c, 8 c, ;
+
+\ ============================================================
+\ RETURN STACK
+\ ============================================================
+
+: gen->r ( -- )
+  $48 c, $83 c, $ed c, 8 c,
+  $48 c, $89 c, $45 c, 0 c,
+  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then ;
+
+: gen-r> ( -- )
+  push-tos
+  $48 c, $8b c, $45 c, 0 c,
+  $48 c, $83 c, $c5 c, 8 c, ;
+
+: gen-r@ ( -- )
+  push-tos
+  $48 c, $8b c, $45 c, 0 c, ;
+
+: gen-2>r ( -- )
+  $48 c, $83 c, $ed c, 16 c,
+  $48 c, $89 c, $45 c, 8 c,
+  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then
+  $48 c, $89 c, $45 c, 0 c,
+  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then ;
+
+: gen-2r> ( -- )
+  push-tos
+  $48 c, $8b c, $45 c, 0 c,
+  push-tos
+  $48 c, $8b c, $45 c, 8 c,
+  $48 c, $83 c, $c5 c, 16 c, ;
+
+: gen-2r@ ( -- )
+  push-tos
+  $48 c, $8b c, $45 c, 0 c,
+  push-tos
+  $48 c, $8b c, $45 c, 8 c, ;
 
 \ ============================================================
 \ CONTROL FLOW
@@ -612,7 +840,7 @@ variable nos+-pending  0 nos+-pending !
 variable call-nargs  1 call-nargs !
 variable call-rets   1 call-rets !
 : gen-call ( addr -- )
-  call-nargs @ 0= if push-tos 1 call-nargs ! then
+  call-nargs @ 0= call-rets @ 0> and if push-tos 1 call-nargs ! then
   stack-depth @ 3 >= call-nargs @ 3 < and if $51 c, then
   stack-depth @ 2 >= call-nargs @ 2 < and if $53 c, then
   $e8 c,
@@ -736,6 +964,7 @@ variable start-jmp
 
 : gen-prologue ( -- )
   $49 c, $bf c, $400000 $8000 + q,
+  $48 c, $bd c, $400000 $F000 + q,
   $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )
@@ -829,6 +1058,50 @@ variable start-jmp
   stack-depth @ 2 >= if $5b c, then
   pop-tos ;
 
+: gen-type ( -- )
+  \ ( addr u -- ) u=rax, addr=rbx
+  1 has-io !
+  stack-depth @ 3 >= if $51 c, then
+  $48 c, $89 c, $c2 c,
+  $48 c, $89 c, $de c,
+  $b8 c, 1 d,
+  $bf c, 1 d,
+  $0f c, $05 c,
+  stack-depth @ 3 >= if $59 c, then
+  -2 stack-depth +!
+  stack-depth @ 1 >= if
+    $48 c, $89 c, $c8 c,
+    stack-depth @ 2 >= if
+      $49 c, $8b c, $0f c,
+      $49 c, $83 c, $c7 c, 8 c,
+    then
+  then ;
+
+: gen-s" ( -- )
+  \ Parse string, emit inline: jmp over; data; over: push addr, push len
+  1 input-pos +!
+  $e9 c, code-here >r 0 d,       \ emit jmp, save patch-addr on rstack
+  code-here 0                     \ ( str-start len )
+  begin
+    input-pos @ input-len @ >= if true else
+    input-buf input-pos @ + c@ [char] " = if
+      1 input-pos +! true
+    else
+      input-buf input-pos @ + c@ c, 1+
+      1 input-pos +! false
+    then then
+  until
+  code-here r> patch-rel32        \ patch jmp to skip over string data
+  swap $400078 + swap             \ ( runtime-addr len )
+  push-tos
+  $48 c, $b8 c, swap q,          \ mov rax, addr
+  push-tos
+  $48 c, $b8 c, q, ;             \ mov rax, len
+
+: gen-dotquote ( -- )
+  gen-s"
+  gen-type ;
+
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
@@ -907,6 +1180,7 @@ s" c!" s, 2constant $c!
 s" ." s, 2constant $.
 s" cr" s, 2constant $cr
 s" emit" s, 2constant $emit
+s" type" s, 2constant $type
 s" if" s, 2constant $if
 s" else" s, 2constant $else
 s" then" s, 2constant $then
@@ -925,6 +1199,33 @@ s" i" s, 2constant $i
 s" j" s, 2constant $j
 s" recurse" s, 2constant $recurse
 s" exit" s, 2constant $exit
+s" >r" s, 2constant $>r
+s" r>" s, 2constant $r>
+s" r@" s, 2constant $r@
+s" 2>r" s, 2constant $2>r
+s" 2r>" s, 2constant $2r>
+s" 2r@" s, 2constant $2r@
+s" min" s, 2constant $min
+s" max" s, 2constant $max
+s" lshift" s, 2constant $lshift
+s" rshift" s, 2constant $rshift
+s" +!" s, 2constant $+!
+s" cells" s, 2constant $cells
+s" cell+" s, 2constant $cell+
+s" variable" s, 2constant $variable
+s" constant" s, 2constant $constant
+s" create" s, 2constant $create
+s" allot" s, 2constant $allot
+s" here" s, 2constant $here
+s" s>d" s, 2constant $s>d
+s" um*" s, 2constant $um*
+s" m*" s, 2constant $m*
+s" um/mod" s, 2constant $um/mod
+s" sm/rem" s, 2constant $sm/rem
+s" fm/mod" s, 2constant $fm/mod
+s" d+" s, 2constant $d+
+s" d-" s, 2constant $d-
+s" ," s, 2constant $,
 s" :" s, 2constant $:
 s" ;" s, 2constant $;
 s" main" s, 2constant $main
@@ -1150,15 +1451,32 @@ variable num-neg
   2dup $0= str= if 2drop ct-flush flush-pending gen-0= true exit then
   2dup $0< str= if 2drop ct-flush flush-pending gen-0< true exit then
   2dup $0> str= if 2drop ct-flush flush-pending gen-0> true exit then
+  2dup $min str= if 2drop ct-flush flush-pending gen-min true exit then
+  2dup $max str= if 2drop ct-flush flush-pending gen-max true exit then
+  2dup $lshift str= if 2drop ct-flush flush-pending gen-lshift true exit then
+  2dup $rshift str= if 2drop ct-flush flush-pending gen-rshift true exit then
+  \ ---- Double-cell: flush, then normal ----
+  2dup $s>d str= if 2drop ct-flush flush-pending gen-s>d true exit then
+  2dup $um* str= if 2drop ct-flush flush-pending gen-um* true exit then
+  2dup $m* str= if 2drop ct-flush flush-pending gen-m* true exit then
+  2dup $um/mod str= if 2drop ct-flush flush-pending gen-um/mod true exit then
+  2dup $sm/rem str= if 2drop ct-flush flush-pending gen-sm/rem true exit then
+  2dup $fm/mod str= if 2drop ct-flush flush-pending gen-fm/mod true exit then
+  2dup $d+ str= if 2drop ct-flush flush-pending gen-d+ true exit then
+  2dup $d- str= if 2drop ct-flush flush-pending gen-d- true exit then
   \ ---- Memory: flush, then normal ----
   2dup $@ str= if 2drop ct-flush gen-@ true exit then
   2dup $! str= if 2drop ct-flush flush-pending gen-! true exit then
   2dup $c@ str= if 2drop ct-flush gen-c@ true exit then
   2dup $c! str= if 2drop ct-flush flush-pending gen-c! true exit then
+  2dup $+! str= if 2drop ct-flush flush-pending gen-+! true exit then
+  2dup $cells str= if 2drop ct-flush gen-cells true exit then
+  2dup $cell+ str= if 2drop ct-flush gen-cell+ true exit then
   \ ---- I/O: flush, then normal ----
   2dup $. str= if 2drop ct-flush flush-pending gen-dot true exit then
   2dup $cr str= if 2drop ct-flush gen-cr true exit then
   2dup $emit str= if 2drop ct-flush flush-pending gen-emit true exit then
+  2dup $type str= if 2drop ct-flush flush-pending gen-type true exit then
   \ ---- Control flow: flush, then normal ----
   2dup $if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
   2dup $<if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
@@ -1182,7 +1500,20 @@ variable num-neg
   2dup $i str= if 2drop ct-flush gen-i true exit then
   2dup $j str= if 2drop ct-flush gen-j true exit then
   2dup $recurse str= if 2drop ct-flush code-here tail-recurse ! gen-recurse true exit then
+  2dup $>r str= if 2drop ct-flush gen->r true exit then
+  2dup $r> str= if 2drop ct-flush gen-r> true exit then
+  2dup $r@ str= if 2drop ct-flush gen-r@ true exit then
+  2dup $2>r str= if 2drop ct-flush gen-2>r true exit then
+  2dup $2r> str= if 2drop ct-flush gen-2r> true exit then
+  2dup $2r@ str= if 2drop ct-flush gen-2r@ true exit then
   2dup $exit str= if 2drop ct-flush gen-ret true exit then
+  2dup $here str= if 2drop data-here @ ct-push true exit then
+  dup 2 = if over dup c@ [char] . = swap 1+ c@ [char] " = and if
+    2drop ct-flush gen-dotquote true exit
+  then then
+  dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] " = and if
+    2drop ct-flush gen-s" true exit
+  then then
   2drop false ;
 
 \ ============================================================
@@ -1319,12 +1650,11 @@ variable scan-name-len
   ct-flush
   2dup dict-find ?dup if
     nip nip
-    dup dict-flags @ ?dup if
-      dup 2 and 0=
-      swap 4 and 0= and if
-        drop exit
-      then
-    then
+    \ DCE: skip void pure calls (IO bit=0, void bit not set)
+    \ Disabled: can't distinguish variable stores from pure functions
+    \ dup dict-flags @ ?dup if
+    \   dup 2 and 0= swap 4 and 0= and if drop exit then
+    \ then
     dup dict-flags @ dup if
       dup 3 rshift $F and call-nargs !
       7 rshift $F and call-rets !
@@ -1408,12 +1738,14 @@ variable ret-count 1 ret-count !
 : end-def ( -- )
   ct-flush
   tail-recurse @ ?dup if
-    code-buf + $e9 swap c!
+    code-pos !
+    gen-tail-recurse
     0 tail-recurse !
   else
     gen-ret
   then
-  has-io @ 1 lshift
+  1
+  has-io @ 1 lshift or
   is-void @ 0= if 4 or then
   arg-count @ 3 lshift or
   ret-count @ 7 lshift or
@@ -1430,11 +1762,49 @@ variable ret-count 1 ret-count !
   2dup $; str= if
     2drop end-def exit
   then
+  2dup $variable str= if
+    2drop get-token
+    dup 0= if 2drop ." Expected name after variable" cr 1 throw then
+    dict-add
+    $48 c, $b8 c, data-here @ q,
+    $c3 c,
+    \ flags: 0 args (0<<3), 1 ret (1<<7), non-void (4)
+    5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+    8 data-here +!
+    exit
+  then
+  2dup $constant str= if
+    2drop get-token
+    dup 0= if 2drop ." Expected name after constant" cr 1 throw then
+    dict-add
+    get-token
+    dup 0= if 2drop ." Expected value after constant name" cr 1 throw then
+    parse-number if
+      $48 c, $b8 c, q,
+      $c3 c,
+      5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+    else ." Bad constant value" cr 1 throw then
+    exit
+  then
+  2dup $create str= if
+    2drop get-token
+    dup 0= if 2drop ." Expected name after create" cr 1 throw then
+    dict-add
+    $48 c, $b8 c, data-here @ q,
+    $c3 c,
+    5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+    exit
+  then
+  2dup $allot str= if
+    2drop interp-val @ data-here +! exit
+  then
   state @ if
     compile-token
   else
-    ." Unexpected token in interpret mode: " type cr
-    1 throw
+    2dup parse-number if nip nip interp-val ! else
+      ." Unexpected token in interpret mode: " type cr
+      1 throw
+    then
   then ;
 
 : compile-all ( -- )
@@ -1467,6 +1837,7 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
+  DATA-BASE data-here !
   gen-prologue
   compile-all
   patch-start
