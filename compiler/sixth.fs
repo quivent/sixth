@@ -116,6 +116,17 @@ DATA-BASE 16 + constant rt-pno-buf \ runtime address of PNO buffer (128 bytes)
 128 constant PNO-SIZE
 variable data-here  DATA-BASE 144 + data-here !
 
+\ Data initialization table (for , and c,)
+64 constant INIT-MAX
+create init-buf INIT-MAX 24 * allot  \ (addr:8, value:8, size:8)
+variable init-count  0 init-count !
+: init-entry ( i -- addr ) 24 * init-buf + ;
+: add-init ( value addr size -- )
+  init-count @ INIT-MAX >= if ." Too many , initializations" cr 1 throw then
+  init-count @ init-entry >r
+  r@ 16 + !  r@ !  r> 8 + !
+  1 init-count +! ;
+
 \ Compilation state
 variable state  0 state !   \ 0=interpret, 1=compile
 variable interp-val  0 interp-val !
@@ -414,6 +425,51 @@ variable fixup-target  0 fixup-target !
   stack-depth @ 3 >= if $59 c, then
   stack-depth @ 2 >= if $5b c, then ;
 
+: gen-spaces ( -- )
+  \ ( n -- ) emit n spaces. Uses loop with syscall.
+  1 has-io !
+  stack-depth @ 2 >= if $53 c, then       \ save rbx
+  stack-depth @ 3 >= if $51 c, then       \ save rcx
+  \ rax = count. Loop: test, jle done, emit space, dec, jmp back.
+  code-here                                \ ( loop-start )
+  $48 c, $85 c, $c0 c,                    \ test rax, rax
+  $7e c,                                   \ jle done (short, patch later)
+  code-here 0 c,                           \ ( loop-start patch-pos ) placeholder
+  $50 c,                                   \ push rax (save counter)
+  $6a c, 32 c,                            \ push 32
+  $b8 c, 1 d,                             \ mov eax, 1
+  $bf c, 1 d,                             \ mov edi, 1
+  $48 c, $89 c, $e6 c,                    \ mov rsi, rsp
+  $ba c, 1 d,                             \ mov edx, 1
+  $0f c, $05 c,                            \ syscall
+  $58 c,                                   \ pop scratch (the space)
+  $58 c,                                   \ pop rax (restore counter)
+  $48 c, $ff c, $c8 c,                    \ dec rax
+  $eb c,                                   \ jmp loop-start (short)
+  code-here 1+ rot - negate c,             \ relative offset back to test
+  \ patch the jle forward jump
+  code-here over - 1- swap code-buf + c!   \ patch jle offset
+  stack-depth @ 3 >= if $59 c, then       \ restore rcx
+  stack-depth @ 2 >= if $5b c, then       \ restore rbx
+  pop-tos ;
+
+: gen-key ( -- )
+  \ ( -- char ) read one byte from stdin via syscall
+  1 has-io !
+  push-tos
+  stack-depth @ 2 >= if $53 c, then       \ save rbx
+  stack-depth @ 3 >= if $51 c, then       \ save rcx
+  $6a c, 0 c,                             \ push 0 (buffer on stack)
+  $48 c, $31 c, $c0 c,                    \ xor eax, eax (sys_read=0)
+  $48 c, $31 c, $ff c,                    \ xor edi, edi (stdin=0)
+  $48 c, $89 c, $e6 c,                    \ mov rsi, rsp (buf=stack)
+  $ba c, 1 d,                             \ mov edx, 1
+  $0f c, $05 c,                            \ syscall
+  $58 c,                                   \ pop rax (the byte, zero-extended)
+  $48 c, $0f c, $b6 c, $c0 c,            \ movzx rax, al
+  stack-depth @ 3 >= if $59 c, then       \ restore rcx
+  stack-depth @ 2 >= if $5b c, then ;     \ restore rbx
+
 : gen-move ( -- )
   \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
   \ rsi/rdi are free (not used by stack machine)
@@ -504,6 +560,49 @@ variable fixup-target  0 fixup-target !
   $48 c, $89 c, $d0 c,
   stack-depth @ 3 >= if $59 c, then
   pop-nos ;
+
+: gen-/mod ( -- )
+  \ ( n1 n2 -- rem quot ) same as gen-div but keep both results
+  stack-depth @ 3 >= if $51 c, then       \ push rcx (save 3rd)
+  $48 c, $89 c, $c7 c,                    \ mov rdi, rax (divisor)
+  $48 c, $89 c, $d8 c,                    \ mov rax, rbx (dividend)
+  $48 c, $99 c,                            \ cqo (sign-extend rax → rdx:rax)
+  $48 c, $f7 c, $ff c,                    \ idiv rdi → rax=quot, rdx=rem
+  $48 c, $89 c, $d3 c,                    \ mov rbx, rdx (rem → NOS)
+  stack-depth @ 3 >= if $59 c, then ;     \ pop rcx (restore 3rd)
+  \ stack unchanged: NOS=rem, TOS=quot
+
+: gen-*/mod ( -- )
+  \ ( n1 n2 n3 -- rem quot ) n1*n2/n3 with intermediate double
+  \ n3=TOS=rax, n2=NOS=rbx, n1=3rd (rcx or [r15])
+  $50 c,                                   \ push rax (save n3=divisor)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,                  \ mov rax, rcx (n1 from 3rd reg)
+  else
+    $49 c, $8b c, $07 c,                  \ mov rax, [r15] (n1 from memory)
+    $49 c, $83 c, $c7 c, 8 c,            \ add r15, 8
+  then
+  $48 c, $f7 c, $eb c,                    \ imul rbx → rdx:rax = n1*n2
+  $59 c,                                   \ pop rcx (n3=divisor)
+  $48 c, $f7 c, $f9 c,                    \ idiv rcx → rax=quot, rdx=rem
+  $48 c, $89 c, $d3 c,                    \ mov rbx, rdx (rem → NOS)
+  -1 stack-depth +! ;                      \ consumed 3, produced 2
+
+: gen-*/ ( -- )
+  \ ( n1 n2 n3 -- quot ) n1*n2/n3 with intermediate double
+  \ Same as */mod but discard remainder
+  $50 c,                                   \ push rax (save n3=divisor)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $c8 c,                  \ mov rax, rcx (n1 from 3rd reg)
+  else
+    $49 c, $8b c, $07 c,                  \ mov rax, [r15] (n1 from memory)
+    $49 c, $83 c, $c7 c, 8 c,            \ add r15, 8
+  then
+  $48 c, $f7 c, $eb c,                    \ imul rbx → rdx:rax = n1*n2
+  $59 c,                                   \ pop rcx (n3=divisor)
+  $48 c, $f7 c, $f9 c,                    \ idiv rcx → rax=quot, rdx=rem
+  pop-nos                                  \ drop NOS, consumed 3 produced 1
+  -1 stack-depth +! ;
 
 : gen-negate ( -- )  $48 c, $f7 c, $d8 c, ;
 : gen-1+ ( -- )  $48 c, $ff c, $c0 c, ;
@@ -616,6 +715,13 @@ variable cmp-pending   0 cmp-pending !
   $0f c, $9d c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
+
+: gen-u< ( -- )
+  \ ( u1 u2 -- flag ) unsigned less-than
+  gen-cmp-setup                            \ cmp rbx, rax; pop-nos
+  $0f c, $92 c, $c0 c,                    \ setb al (unsigned below)
+  $48 c, $0f c, $b6 c, $c0 c,            \ movzx rax, al
+  $48 c, $f7 c, $d8 c, ;                  \ neg rax (true = -1)
 
 : gen-0= ( -- )
   $48 c, $85 c, $c0 c,
@@ -1300,6 +1406,47 @@ variable start-jmp
   stack-depth @ 3 >= if $59 c, then
   pop-tos ;
 
+: gen-u. ( -- )
+  \ ( u -- ) unsigned print with trailing space
+  \ Same as gen-dot but no sign handling
+  1 has-io !
+  stack-depth @ 3 >= if $51 c, then       \ save rcx
+  $45 c, $31 c, $c0 c,                    \ xor r8d, r8d (digit count)
+  \ Division loop: div rax by 10, push remainder as digit
+  code-here
+  $48 c, $c7 c, $c1 c, 10 d,             \ mov rcx, 10
+  $48 c, $31 c, $d2 c,                    \ xor rdx, rdx
+  $48 c, $f7 c, $f1 c,                    \ div rcx → rax=quot, rdx=rem
+  $83 c, $c2 c, $30 c,                    \ add edx, '0'
+  $52 c,                                   \ push rdx (digit)
+  $41 c, $ff c, $c0 c,                    \ inc r8d (digit count)
+  $48 c, $85 c, $c0 c,                    \ test rax, rax
+  $75 c,                                   \ jnz back to div loop
+  dup code-here 1+ - c,
+  drop
+  \ Print loop: pop and write each digit
+  code-here
+  $b8 c, 1 d,                             \ mov eax, 1
+  $bf c, 1 d,                             \ mov edi, 1
+  $48 c, $89 c, $e6 c,                    \ mov rsi, rsp
+  $ba c, 1 d,                             \ mov edx, 1
+  $0f c, $05 c,                            \ syscall
+  $58 c,                                   \ pop (discard digit)
+  $41 c, $ff c, $c8 c,                    \ dec r8d
+  $75 c,                                   \ jnz back to print loop
+  dup code-here 1+ - c,
+  drop
+  \ Trailing space
+  $6a c, 32 c,                            \ push 32
+  $b8 c, 1 d,                             \ mov eax, 1
+  $bf c, 1 d,                             \ mov edi, 1
+  $48 c, $89 c, $e6 c,                    \ mov rsi, rsp
+  $ba c, 1 d,                             \ mov edx, 1
+  $0f c, $05 c,                            \ syscall
+  $58 c,                                   \ pop scratch
+  stack-depth @ 3 >= if $59 c, then       \ restore rcx
+  pop-tos ;
+
 : gen-cr ( -- )
   1 has-io !
   $50 c,
@@ -1589,6 +1736,18 @@ s" sign" s, 2constant $sign
 s" #" s, 2constant $#
 s" #s" s, 2constant $#s
 s" #>" s, 2constant $#>
+s" c," s, 2constant $c,
+s" key" s, 2constant $key
+s" bl" s, 2constant $bl
+s" decimal" s, 2constant $decimal
+s" chars" s, 2constant $chars
+s" char+" s, 2constant $char+
+s" /mod" s, 2constant $/mod
+s" */mod" s, 2constant $*/mod
+s" */" s, 2constant $*/
+s" spaces" s, 2constant $spaces
+s" u." s, 2constant $u.
+s" u<" s, 2constant $u<
 s" :" s, 2constant $:
 s" ;" s, 2constant $;
 s" main" s, 2constant $main
@@ -1789,6 +1948,11 @@ variable num-neg
   2dup $mod str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap mod ct-push
     else ct-flush flush-pending gen-mod then true exit then
+  2dup $/mod str= if 2drop flush-swap
+    ct-depth @ 2 >= if ct-pop ct-pop swap /mod >r ct-push r> ct-push
+    else ct-flush flush-pending gen-/mod then true exit then
+  2dup $*/mod str= if 2drop flush-swap ct-flush flush-pending gen-*/mod true exit then
+  2dup $*/ str= if 2drop flush-swap ct-flush flush-pending gen-*/ true exit then
   \ ---- Unary arithmetic with fold ----
   2dup $negate str= if 2drop flush-cmp
     swap-pending @ if
@@ -1848,6 +2012,7 @@ variable num-neg
   2dup $> str= if 2drop flush-swap ct-flush flush-pending gen-> true exit then
   2dup $<= str= if 2drop flush-swap ct-flush flush-pending gen-<= true exit then
   2dup $>= str= if 2drop flush-swap ct-flush flush-pending gen->= true exit then
+  2dup $u< str= if 2drop flush-swap ct-flush flush-pending gen-u< true exit then
   2dup $0= str= if 2drop dup-pending @ 0 dup-pending !
     flush-swap ct-flush flush-pending
     if 1 cmp-pending ! else gen-0= then true exit then
@@ -1878,12 +2043,23 @@ variable num-neg
   2dup $+! str= if 2drop flush-swap ct-flush flush-pending gen-+! true exit then
   2dup $cells str= if 2drop flush-swap ct-flush gen-cells true exit then
   2dup $cell+ str= if 2drop flush-swap ct-flush gen-cell+ true exit then
+  2dup $bl str= if 2drop flush-swap 32 ct-push true exit then
+  2dup $chars str= if 2drop true exit then   \ nop on byte-addressed machine
+  2dup $char+ str= if 2drop flush-swap
+    ct-depth @ 0> if ct-pop 1+ ct-push else gen-1+ then true exit then
+  2dup $decimal str= if 2drop flush-swap ct-flush
+    \ mov qword [rt-base], 10
+    $48 c, $c7 c, $04 c, $25 c, rt-base d, 10 d,
+    true exit then
   \ ---- I/O: flush, then normal ----
   2dup $. str= if 2drop flush-swap ct-flush flush-pending gen-dot true exit then
   2dup $cr str= if 2drop flush-swap ct-flush gen-cr true exit then
   2dup $emit str= if 2drop flush-swap ct-flush flush-pending gen-emit true exit then
   2dup $type str= if 2drop flush-swap ct-flush flush-pending gen-type true exit then
   2dup $space str= if 2drop flush-swap ct-flush gen-space true exit then
+  2dup $spaces str= if 2drop flush-swap ct-flush flush-pending gen-spaces true exit then
+  2dup $u. str= if 2drop flush-swap ct-flush flush-pending gen-u. true exit then
+  2dup $key str= if 2drop flush-swap ct-flush gen-key true exit then
   \ ---- Memory operations ----
   2dup $move str= if 2drop flush-swap ct-flush flush-pending gen-move true exit then
   2dup $fill str= if 2drop flush-swap ct-flush flush-pending gen-fill true exit then
@@ -2041,6 +2217,9 @@ variable scan-io
     2dup $cr str= if 1 scan-io ! then
     2dup $emit str= if 1 scan-io ! then
     2dup $space str= if 1 scan-io ! then
+    2dup $spaces str= if 1 scan-io ! then
+    2dup $u. str= if 1 scan-io ! then
+    2dup $key str= if 1 scan-io ! then
     2dup $type str= if 1 scan-io ! then
     2drop
   again ;
@@ -2084,11 +2263,11 @@ variable scan-name-len
   \ User definitions override builtins (standard Forth semantics)
   2dup dict-find ?dup if
     nip nip flush-swap ct-flush
-    \ DCE: skip void pure calls (IO bit=0, void bit not set)
-    \ Disabled: can't distinguish variable stores from pure functions
-    \ dup dict-flags @ ?dup if
-    \   dup 2 and 0= swap 4 and 0= and if drop exit then
-    \ then
+    \ INLINE: variable/constant stubs → ct-push the literal value
+    dup dict-flags @ $800 and if
+      dict-addr @ $FFFFFFFF and 2 + code-buf + @ ct-push
+      exit
+    then
     dup dict-flags @ dup if
       dup 3 rshift $F and call-nargs !
       7 rshift $F and call-rets !
@@ -2211,8 +2390,8 @@ variable ret-count 1 ret-count !
     dict-add
     $48 c, $b8 c, data-here @ q,
     $c3 c,
-    \ flags: 0 args (0<<3), 1 ret (1<<7), non-void (4)
-    5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+    \ flags: 0 args (0<<3), 1 ret (1<<7), non-void (4), inline ($800)
+    5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     8 data-here +!
     exit
   then
@@ -2225,7 +2404,7 @@ variable ret-count 1 ret-count !
     parse-number if
       $48 c, $b8 c, q,
       $c3 c,
-      5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+      5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     else ." Bad constant value" cr 1 throw then
     exit
   then
@@ -2235,11 +2414,17 @@ variable ret-count 1 ret-count !
     dict-add
     $48 c, $b8 c, data-here @ q,
     $c3 c,
-    5 128 or dict-buf dict-count @ 1- 32 * + dict-flags !
+    5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     exit
   then
   2dup $allot str= if
     2drop interp-val @ data-here +! exit
+  then
+  2dup $, str= if
+    2drop interp-val @ data-here @ 8 add-init 8 data-here +! exit
+  then
+  2dup $c, str= if
+    2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
   then
   state @ if
     compile-token
@@ -2289,6 +2474,19 @@ variable ret-count 1 ret-count !
   0 swap-pending !  0 dup-pending !  0 cmp-pending !
   \ Initialize base variable to 10
   $48 c, $c7 c, $04 c, $25 c, rt-base d, 10 d,  \ mov qword [rt-base], 10
+  \ Emit data initializations from , and c,
+  init-count @ 0 ?do
+    i init-entry >r
+    r@ 16 + @ 8 = if
+      \ mov rdi, value; mov qword [addr], rdi
+      $48 c, $bf c, r@ 8 + @ q,
+      $48 c, $89 c, $3c c, $25 c, r@ @ d,
+    else
+      \ mov byte [addr], value
+      $c6 c, $04 c, $25 c, r@ @ d, r@ 8 + @ c,
+    then
+    r> drop
+  loop
   $main dict-find
   ?dup if
     0 call-nargs !  0 call-rets !
