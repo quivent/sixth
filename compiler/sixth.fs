@@ -1,6 +1,6 @@
-\ tf.fs - Fifth Native Compiler
-\ Self-hosting: fifth tf.fs tf.fs → native tf compiler
-\ Then: ./tf program.fs → native program
+\ sixth.fs - Sixth Native Compiler
+\ Self-hosting: sixth sixth.fs sixth.fs → native sixth compiler
+\ Then: ./sixth program.fs → native program
 \
 \ OPTIMIZATIONS IN THIS FILE (do not remove without understanding):
 \
@@ -2312,7 +2312,7 @@ variable out-len
 create cmd-buf 128 allot
 
 : usage ( -- )
-  ." Usage: fifth tf.fs <input.fs> <output>" cr bye ;
+  ." Usage: sixth sixth.fs <input.fs> <output>" cr bye ;
 
 : make-executable ( -- )
   s" chmod +x " cmd-buf swap move

@@ -1,14 +1,14 @@
-# Fifth Native Compiler
+# Sixth Native Compiler
 
 **Forth script compiles Forth script to binary machine code.**
 
-No C. No assembly. No linker. No external tools. The Fifth interpreter
-runs a Forth program (`tf.fs`) which reads your Forth source and emits
+No C. No assembly. No linker. No external tools. The Sixth interpreter
+runs a Forth program (`sixth.fs`) which reads your Forth source and emits
 x86_64 ELF bytes directly. That is all.
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   fifth     │ --> │   tf.fs     │ --> │  program    │
+│   sixth     │ --> │  sixth.fs   │ --> │  program    │
 │ interpreter │     │  compiler   │     │   (ELF)     │
 └─────────────┘     └─────────────┘     └─────────────┘
       C              990 lines Forth      172-500 bytes
@@ -18,7 +18,7 @@ x86_64 ELF bytes directly. That is all.
 
 | File | Lines | Language | Purpose |
 |------|-------|----------|---------|
-| `../tf.fs` | 990 | **Forth** | Full native compiler (self-hosting) |
+| `../sixth.fs` | 990 | **Forth** | Full native compiler (self-hosting) |
 | `../ff.fs` | 346 | **Forth** | Minimal compiler (numbers, arithmetic, print) |
 
 No C in the compilers. Pure Forth. Reads Forth, emits bytes.
@@ -29,7 +29,7 @@ Missing words belong in `lib/core.fs`. Not in every script.
 
 ```bash
 # Add a word
-fifth compiler/addword.fs nip '( a b -- b )' 'swap drop'
+sixth compiler/addword.fs nip '( a b -- b )' 'swap drop'
 ```
 
 Scripts that need library words: `require lib/core.fs`
@@ -39,8 +39,8 @@ Scripts that need library words: `require lib/core.fs`
 The C interpreter (`engine/`) is scaffolding. The native compiler eliminates it.
 
 ```
-Today:    fifth (C) runs tf.fs → binary
-Tomorrow: tf compiles tf.fs → tf (native, no C anywhere)
+Today:    sixth (C) runs sixth.fs → binary
+Tomorrow: sixth compiles sixth.fs → sixth (native, no C anywhere)
 ```
 
 Forth compiling Forth to machine code. No C. No assembler. No linker. That is the goal.
@@ -54,16 +54,16 @@ The result: standalone executables under 400 bytes that run at native speed.
 
 ```bash
 cd compiler/native
-../../fifth hello.fs && ./hello        # Hello, World!
-../../fifth sum1b.fs && ./sum1b        # Sum 1 to 1 billion
-../../fifth sieve-fast.fs && ./sieve-fast  # Count primes to 1M
+../../sixth hello.fs && ./hello        # Hello, World!
+../../sixth sum1b.fs && ./sum1b        # Sum 1 to 1 billion
+../../sixth sieve-fast.fs && ./sieve-fast  # Count primes to 1M
 ```
 
 ## Benchmarks
 
 ### Binary Sizes
 
-| Program | Fifth | C (gcc) | Ratio |
+| Program | Sixth | C (gcc) | Ratio |
 |---------|-------|---------|-------|
 | hello | 172 bytes | ~16 KB | **93x smaller** |
 | sum1b | 228 bytes | ~16 KB | **70x smaller** |
@@ -74,37 +74,37 @@ cd compiler/native
 
 **vs C -O0 (unoptimized):**
 
-| Benchmark | Fifth | C -O0 | Fifth wins by |
+| Benchmark | Sixth | C -O0 | Sixth wins by |
 |-----------|-------|-------|---------------|
 | sum 1B | 0.20s | 0.53s | **2.6x faster** |
 | loop 10B | 1.84s | 3.44s | **1.9x faster** |
 
 **vs C -O2 (optimized):**
 
-| Benchmark | Fifth | C -O2 | Notes |
+| Benchmark | Sixth | C -O2 | Notes |
 |-----------|-------|-------|-------|
 | sieve 1M | 0.002s | 0.003s | **1.5x faster** |
 | sum 1B | 0.20s | instant | gcc computes at compile time |
 | loop 10B | 1.84s | instant | gcc eliminates the loop |
 
-Fifth generates register-cached loops that beat unoptimized C by 2-3x.
+Sixth generates register-cached loops that beat unoptimized C by 2-3x.
 Against -O2, simple loops lose to constant folding, but real algorithms (sieve) run faster.
 
 ## Examples
 
 ```bash
-../../fifth square.fs && ./square        # 49 (7*7)
-../../fifth sum.fs && ./sum              # 500000500000 (sum 1-1M)
-../../fifth fib.fs && ./fib              # 102334155 (fib 40)
-../../fifth fib-rec.fs && ./fib-rec      # 9227465 (recursive fib 35)
-../../fifth primes.fs && ./primes        # 78498 (primes to 1M)
-../../fifth collatz.fs && ./collatz      # 524 (Collatz steps for 837799)
-../../fifth collatz-max.fs && ./collatz-max  # 837799 (longest Collatz under 1M)
-../../fifth sieve.fs && ./sieve          # 1229 (primes to 10K)
-../../fifth sieve-1m.fs && ./sieve-1m    # 78498 (primes to 1M)
-../../fifth sieve-fast.fs && ./sieve-fast   # 78498 (optimized)
-../../fifth mandelbrot.fs && ./mandelbrot   # ASCII Mandelbrot
-../../fifth qsort.fs && ./qsort          # Sort 16 values
+../../sixth square.fs && ./square        # 49 (7*7)
+../../sixth sum.fs && ./sum              # 500000500000 (sum 1-1M)
+../../sixth fib.fs && ./fib              # 102334155 (fib 40)
+../../sixth fib-rec.fs && ./fib-rec      # 9227465 (recursive fib 35)
+../../sixth primes.fs && ./primes        # 78498 (primes to 1M)
+../../sixth collatz.fs && ./collatz      # 524 (Collatz steps for 837799)
+../../sixth collatz-max.fs && ./collatz-max  # 837799 (longest Collatz under 1M)
+../../sixth sieve.fs && ./sieve          # 1229 (primes to 10K)
+../../sixth sieve-1m.fs && ./sieve-1m    # 78498 (primes to 1M)
+../../sixth sieve-fast.fs && ./sieve-fast   # 78498 (optimized)
+../../sixth mandelbrot.fs && ./mandelbrot   # ASCII Mandelbrot
+../../sixth qsort.fs && ./qsort          # Sort 16 values
 ```
 
 ## Architecture

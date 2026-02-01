@@ -1,12 +1,12 @@
-# Fifth Compiler
+# Sixth Compiler
 
-The Fifth compiler (`tf.fs`) generates x86-64 ELF binaries directly. 1511 lines of Forth emitting machine code bytes. No Rust, no LLVM, no Cranelift.
+The Sixth compiler (`sixth.fs`) generates x86-64 ELF binaries directly. 1511 lines of Forth emitting machine code bytes. No Rust, no LLVM, no Cranelift.
 
 See [native/README.md](native/README.md) for benchmarks and examples.
 
-## What tf.fs Actually Compiles
+## What sixth.fs Actually Compiles
 
-tf.fs compiles a **subset** of Forth, not Forth.
+sixth.fs compiles a **subset** of Forth, not Forth.
 
 ### Supported
 
@@ -36,7 +36,7 @@ Without `@` and `!` you cannot build anything with state. Without strings you ca
 
 The test suite has 1050 tests. 999 pass with strict output comparison. That number is real but misleading.
 
-**Every single test is a pure stack-and-arithmetic program.** Zero tests use `variable`, `@`, `!`, `create`, `allot`, strings, file I/O, or any memory operations. The tests were written knowing what tf.fs can compile. They confirm the supported subset works. They say nothing about whether tf.fs is a usable Forth compiler.
+**Every single test is a pure stack-and-arithmetic program.** Zero tests use `variable`, `@`, `!`, `create`, `allot`, strings, file I/O, or any memory operations. The tests were written knowing what sixth.fs can compile. They confirm the supported subset works. They say nothing about whether sixth.fs is a usable Forth compiler.
 
 A real test suite would start from the Forth standard and ask "what can't you compile?" This suite did the opposite.
 
@@ -44,12 +44,12 @@ A real test suite would start from the Forth standard and ask "what can't you co
 
 ```bash
 # Strict output comparison (Forth runner)
-./fifth compiler/tests/run.fs
+./sixth compiler/tests/run.fs
 
 # Results: PASS/WRONG/CFAIL/RFAIL/SKIP
 ```
 
-Each test file has a `\ expect: <output>` comment on line 1. The runner compiles with tf.fs, runs the binary, captures output, and compares against the expected value. Tests without expected output (regression tests) are verified by clean exit only.
+Each test file has a `\ expect: <output>` comment on line 1. The runner compiles with sixth.fs, runs the binary, captures output, and compares against the expected value. Tests without expected output (regression tests) are verified by clean exit only.
 
 ## What Would Make This a Real Compiler
 
@@ -57,4 +57,4 @@ Each test file has a `\ expect: <output>` comment on line 1. The runner compiles
 2. **Strings**: `s"`, `type` — real I/O
 3. **Return stack**: `>r`, `r>`, `r@` — temporary storage
 4. **Constants**: `constant`, `value` — named values
-5. **Self-hosting**: tf.fs should be able to compile tf.fs
+5. **Self-hosting**: sixth.fs should be able to compile sixth.fs

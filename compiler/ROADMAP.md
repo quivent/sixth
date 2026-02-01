@@ -1,16 +1,16 @@
-# tf.fs Native Compiler Roadmap
+# sixth.fs Native Compiler Roadmap
 
 ## Current State
 
-tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
+sixth.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 
 ### Vocabulary Coverage
 
 | Source | Words | Notes |
 |--------|-------|-------|
-| tf.fs compiled | 105 | 93 standard + 12 custom |
-| ANS Forth Core | ~180 | tf.fs covers 33% |
-| Fifth interpreter | ~480 | 178 C prims + 15 boot + 302 lib |
+| sixth.fs compiled | 105 | 93 standard + 12 custom |
+| ANS Forth Core | ~180 | sixth.fs covers 33% |
+| Sixth interpreter | ~480 | 178 C prims + 15 boot + 302 lib |
 
 ### 71 Compiled Words
 
@@ -30,18 +30,18 @@ tf.fs compiles Forth to x86-64 machine code. Single-pass, ~1500 lines of Forth.
 
 | Metric | Value | Target |
 |--------|-------|--------|
-| tf.fs avg compile time | 7.0ms | < 10ms |
+| sixth.fs avg compile time | 7.0ms | < 10ms |
 | gcc-O2 avg compile time | 29.2ms | (reference) |
-| tf.fs avg runtime | 1.4ms | < 2.0ms |
+| sixth.fs avg runtime | 1.4ms | < 2.0ms |
 | gcc-O2 avg runtime | 1.6ms | (reference) |
-| tf.fs/gcc-O2 speed ratio | 0.88x | > 0.80x |
+| sixth.fs/gcc-O2 speed ratio | 0.88x | > 0.80x |
 | Correctness | 999/1050 (95%) | >= 999/1050 |
 
 ### Headline Speedups: Native vs Interpreter (protect these)
 
 Heavy-iteration benchmarks in `bench/`. These measure the full compiler payoff.
 
-**Custom-word benchmarks** (nos+, 1-nzloop — tf.fs superinstructions):
+**Custom-word benchmarks** (nos+, 1-nzloop — sixth.fs superinstructions):
 
 | Benchmark | Interpreted | Native | gcc -O2 | vs Interp | vs gcc |
 |-----------|------------|--------|---------|-----------|--------|
@@ -85,10 +85,10 @@ uses `nos+` (single `inc rbx` instruction) in a tight loop.
 
 ### Regression Testing
 
-`compiler/regress.fs` — compiles each test with tf.fs, runs it, compares output to `\ expect:` comment. ~8 seconds for 1050 tests. No GCC needed.
+`compiler/regress.fs` — compiles each test with sixth.fs, runs it, compares output to `\ expect:` comment. ~8 seconds for 1050 tests. No GCC needed.
 
 ```
-./fifth compiler/regress.fs
+./sixth compiler/regress.fs
 ```
 
 Current baseline: 999 pass, 51 skip. Phases 1-4 complete: return stack, memory/defining words, trivial ops, strings. call/fibrec benchmarks fixed (tail-call patch was overwriting register saves instead of call opcode).
@@ -107,7 +107,7 @@ r@ : push rax ; mov rax, [rbp]
 
 The return stack is separate from the x86 call stack (rsp). Allocate 8KB at a fixed address in the ELF (e.g., 0x500000). Initialize `rbp` to top of this region at program start.
 
-**Complexity**: Low. ~50 lines added to tf.fs.
+**Complexity**: Low. ~50 lines added to sixth.fs.
 
 **Impact**: Enables idioms like `2>r ... 2r>` for string pair save/restore. Required by many standard programs.
 
@@ -115,7 +115,7 @@ The return stack is separate from the x86 call stack (rsp). Allocate 8KB at a fi
 
 **Words**: `variable` `constant` `create` `allot` `!` `@` `c!` `c@` `+!` `cells` `cell+` `here` `,`
 
-**Implementation**: Add a data segment to the ELF output. tf.fs currently emits a single LOAD segment (text only). Add a second LOAD segment at 0x600000 for read-write data.
+**Implementation**: Add a data segment to the ELF output. sixth.fs currently emits a single LOAD segment (text only). Add a second LOAD segment at 0x600000 for read-write data.
 
 - `variable` allocates 8 bytes in data segment, compiles as `push rax; mov rax, <addr>`
 - `constant` compiles as `push rax; mov rax, <value>` (same as literal)
@@ -184,4 +184,4 @@ um* : pop rbx ; mul rbx  ; push rdx ; (rax already has low)
 4. Strings (needs data segment)
 5. Double-cell (niche, but required for ANS compliance)
 
-After all phases: ~110 standard words compiled, ~61% ANS Core coverage. tf.fs grows from ~1500 to ~2000 lines.
+After all phases: ~110 standard words compiled, ~61% ANS Core coverage. sixth.fs grows from ~1500 to ~2000 lines.
