@@ -1,8 +1,8 @@
-# Fifth Native Compiler - Optimization Plan
+# Sixth Native Compiler - Optimization Plan
 
 ## Current State
 
-- tf.fs compiles Fifth to x86_64 ELF binaries
+- sixth.fs compiles Sixth to x86_64 ELF binaries
 - TOS cached in rax
 - Matches GCC -O1 on tight loops (2 instructions)
 - Beats GCC -O0 on full benchmark (0.083s vs 0.106s)
@@ -25,8 +25,8 @@ Compiler size: 995 lines, 32KB
 ### 1. More Benchmarks - DONE
 
 Fibonacci added. Results:
-- Loop: Fifth matches GCC -O1 (2 instructions)
-- Fib: Fifth is 25% slower than GCC -O0 (call overhead)
+- Loop: Sixth matches GCC -O1 (2 instructions)
+- Fib: Sixth is 25% slower than GCC -O0 (call overhead)
 
 Next benchmarks:
 ```forth
@@ -125,7 +125,7 @@ GCC -O2 territory. Complex.
 ## Non-Goals
 
 - Portability (x86_64 Linux only)
-- Standards compliance (this is Fifth, not ANS Forth)
+- Standards compliance (this is Sixth, not ANS Forth)
 - Safety (no bounds checking, caller's problem)
 - Large programs (fits in head or don't write it)
 
@@ -142,7 +142,7 @@ If complexity outweighs benefit, don't do it.
 ## Files to Modify
 
 ```
-compiler/tf.fs     - Main compiler (add peephole patterns)
+compiler/sixth.fs     - Main compiler (add peephole patterns)
 bench/*.fs         - More benchmarks
 PERF.md            - Results log
 ```

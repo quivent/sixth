@@ -14,10 +14,10 @@ s" echo 'Engine (to eliminate):'" system
 s" wc -l engine/*.c engine/*.h" system
 s" echo ''" system
 s" echo 'Native compiler (pure Forth):'" system
-s" wc -l compiler/tf.fs compiler/ff.fs" system
+s" wc -l compiler/sixth.fs compiler/ff.fs" system
 s" echo ''" system
 s" echo '=== PLAN ==='" system
-s" echo '1. tf.fs compiles itself -> native tf'" system
+s" echo '1. sixth.fs compiles itself -> native tf'" system
 s" echo '2. native tf compiles programs -> no C needed'" system
 s" echo '3. Delete engine/'" system
 

@@ -1,4 +1,4 @@
-\ bench.fs - Benchmark tf.fs vs GCC at -O0/-O1/-O2/-O3
+\ bench.fs - Benchmark sixth.fs vs GCC at -O0/-O1/-O2/-O3
 \ Ports run_benchmarks.py + forth2c.py to Forth
 \ Usage: fifth compiler/bench.fs
 \ Output: BENCHMARK01.md
@@ -468,7 +468,7 @@ create path-stash 256 allot  variable path-stash-len
 
 : bench-tf-compile ( -- )
   str-reset
-  s" ./fifth compiler/tf.fs " str+ path$ str+ s"  /tmp/fb/tf-out >/dev/null 2>&1" str+
+  s" ./sixth compiler/sixth.fs " str+ path$ str+ s"  /tmp/fb/tf-out >/dev/null 2>&1" str+
   ns-time
   0= if t-tf-comp ! else drop -1 t-tf-comp ! then ;
 
@@ -572,7 +572,7 @@ variable list-len
 \ === Main ===
 
 : md-header ( -- )
-  s" # Fifth Compiler Benchmark Results" md-line
+  s" # Sixth Compiler Benchmark Results" md-line
   s" " md-line s" " md-line
   s" | # | Test | Correct | tf comp | gcc-O0 comp | gcc-O1 comp | gcc-O2 comp | gcc-O3 comp | tf run | gcc-O0 run | gcc-O1 run | gcc-O2 run | gcc-O3 run | tf/gcc-O2 |" md-line
   s" |---|------|---------|---------|-------------|-------------|-------------|-------------|--------|------------|------------|------------|------------|-----------|" md-line ;
@@ -591,7 +591,7 @@ variable list-len
   s" ## Correctness Summary" md-line s" " md-line
   s" - **Correct (tf = gcc)**: " md-type yes-count @ md-num md-nl
   s" - **Wrong output**: " md-type no-count @ md-num md-nl
-  s" - **tf.fs no output**: " md-type tf-fail-count @ md-num md-nl
+  s" - **sixth.fs no output**: " md-type tf-fail-count @ md-num md-nl
   s" - **C translation failed**: " md-type nt-count @ md-num md-nl
   s" - **GCC failed**: " md-type cfail-count @ md-num md-nl
   s" - **Both no output**: " md-type both-count @ md-num md-nl
@@ -601,20 +601,20 @@ variable list-len
   s" " md-line
   s" ## Performance Summary" md-line s" " md-line
   tf-comp-n @ 0> if
-    s" - tf.fs avg compile: " md-type tf-comp-sum @ tf-comp-n @ / md-ms s" ms" md-line
+    s" - sixth.fs avg compile: " md-type tf-comp-sum @ tf-comp-n @ / md-ms s" ms" md-line
   then
   g2-comp-n @ 0> if
     s" - gcc-O2 avg compile: " md-type g2-comp-sum @ g2-comp-n @ / md-ms s" ms" md-line
   then
   tf-run-n @ 0> if
-    s" - tf.fs avg runtime: " md-type tf-run-sum @ tf-run-n @ / md-ms s" ms" md-line
+    s" - sixth.fs avg runtime: " md-type tf-run-sum @ tf-run-n @ / md-ms s" ms" md-line
   then
   g2-run-n @ 0> if
     s" - gcc-O2 avg runtime: " md-type g2-run-sum @ g2-run-n @ / md-ms s" ms" md-line
   then ;
 
 \ === Batch mode ===
-\ bench.sh calls us with: ./fifth compiler/bench.fs <batch-file>
+\ bench.sh calls us with: ./sixth compiler/bench.fs <batch-file>
 \ We read the batch file, run those tests, append rows to /tmp/fb/out.md
 \ and write counters to /tmp/fb/counters.txt
 

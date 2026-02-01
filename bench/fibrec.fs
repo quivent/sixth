@@ -3,4 +3,4 @@
 : countdown ( n -- 0 )
   dup 0= if exit then
   1- recurse ;
-: main ( -- ) 100000 countdown . cr ;
+: main ( -- ) 10000000 countdown . cr ;

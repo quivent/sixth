@@ -1,35 +1,35 @@
-# Fifth Native Compiler Context
+# Sixth Native Compiler Context
 
-You are working on Fifth, a Forth that compiles directly to x86-64 machine code bytes.
+You are working on Sixth, a Forth that compiles directly to x86-64 machine code bytes.
 
 ## The One True Path
 
 ```
-Forth source → tf.fs → raw bytes → ELF binary
+Forth source → sixth.fs → raw bytes → ELF binary
 ```
 
 **NO C. NO RUST. NO CRANELIFT. NO DEPENDENCIES. NO INTERMEDIARIES.**
 
-## What tf.fs Is
+## What sixth.fs Is
 
-tf.fs is a **compiler**, not an assembler:
+sixth.fs is a **compiler**, not an assembler:
 - INPUT: Forth source code (`: fib dup 2 < if ... ;`)
 - OUTPUT: raw x86-64 machine code bytes in an ELF binary
 
-It is a compiler because it takes a high-level language (Forth) and outputs the lowest level (bytes). An assembler would take assembly text as input - tf.fs skips that entirely.
+It is a compiler because it takes a high-level language (Forth) and outputs the lowest level (bytes). An assembler would take assembly text as input - sixth.fs skips that entirely.
 
 ## Architecture Levels
 
 ```
-Forth       (high-level)     ← tf.fs INPUT
+Forth       (high-level)     ← sixth.fs INPUT
 Assembly    (mov rax, rbx)   ← SKIPPED
-Bytes       (0x48 0x89 0xc3) ← tf.fs OUTPUT (lowest level)
+Bytes       (0x48 0x89 0xc3) ← sixth.fs OUTPUT (lowest level)
 ```
 
 ## Current State
 
-- **tf.fs at HEAD** (97 lines): Stripped to byte emission only. The compiler logic was removed.
-- **tf.fs at commit 86490d4** (544 lines): Full compiler with TOS caching. Achieves 40-50% of C speed.
+- **sixth.fs at HEAD** (97 lines): Stripped to byte emission only. The compiler logic was removed.
+- **sixth.fs at commit 86490d4** (544 lines): Full compiler with TOS caching. Achieves 40-50% of C speed.
 - **Hand-coded benchmarks** in `compiler/native/`: Achieve 90% of C speed.
 
 ## Why the Performance Gap
@@ -58,7 +58,7 @@ Build a compiler that generates code like the hand-coded versions:
 
 | File | Purpose |
 |------|---------|
-| `compiler/tf.fs` | The compiler (restore from 86490d4 or rebuild) |
+| `compiler/sixth.fs` | The compiler (restore from 86490d4 or rebuild) |
 | `compiler/native/*.fs` | Hand-coded benchmarks - the performance target |
 | `compiler/native/README.md` | Benchmark results |
 
@@ -66,10 +66,10 @@ Build a compiler that generates code like the hand-coded versions:
 
 ```bash
 # Run a .fs file through the interpreter
-./fifth myprogram.fs
+./sixth myprogram.fs
 
 # The compiler (when restored) would be:
-./fifth compiler/tf.fs input.fs    # → produces a.out
+./sixth compiler/sixth.fs input.fs    # → produces a.out
 ./a.out                             # → runs native binary
 ```
 
@@ -77,10 +77,10 @@ Build a compiler that generates code like the hand-coded versions:
 
 ```bash
 # See the full compiler with TOS caching:
-git show 86490d4:compiler/tf.fs
+git show 86490d4:compiler/sixth.fs
 
 # See what was removed:
-git diff 86490d4..HEAD -- compiler/tf.fs
+git diff 86490d4..HEAD -- compiler/sixth.fs
 ```
 
 ## Do NOT
@@ -90,7 +90,7 @@ git diff 86490d4..HEAD -- compiler/tf.fs
 - Mention Rust
 - Mention LLVM
 - Suggest any intermediary language
-- Call tf.fs an "assembler"
+- Call sixth.fs an "assembler"
 - Forget that the 544-line compiler existed
 
 ## Do

@@ -1,7 +1,7 @@
-\ compare.fs - Compare tf.fs native vs gcc -O2 on bench/*.fs
-\ Usage: ./fifth bench/compare.fs
+\ compare.fs - Compare sixth.fs native vs gcc -O2 on bench/*.fs
+\ Usage: ./sixth bench/compare.fs
 \ Shows compile time and runtime for both compilers.
-\ Ratio = tf/gcc (lower is better for tf.fs, 1.00 = equal).
+\ Ratio = tf/gcc (lower is better for sixth.fs, 1.00 = equal).
 
 require lib/str.fs
 
@@ -67,9 +67,9 @@ variable gcc-run
 : run-bench ( addr u -- )
   stash-name
 
-  \ --- Compile with tf.fs (median of 3) ---
+  \ --- Compile with sixth.fs (median of 3) ---
   cmd-reset
-  s" ./fifth compiler/tf.fs bench/" cmd+
+  s" ./sixth compiler/sixth.fs bench/" cmd+
   name$ cmd+
   s" .fs /tmp/_bench_cmp >/dev/null 2>&1" cmd+
   cmd$ time3 tf-comp !

@@ -120,7 +120,7 @@ variable wrong-log-len
 
   \ Compile
   str-reset
-  s" ./fifth compiler/tf.fs " str+
+  s" ./sixth compiler/sixth.fs " str+
   path$ str+
   s"  /tmp/t-" str+
   stash$ str+

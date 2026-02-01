@@ -1,6 +1,8 @@
-\ mem.fs - Memory write/read (1K iterations at 8-byte stride)
+\ mem.fs - Memory write/read (100K passes over 1K entries)
 \ Region: 0x404000-0x406000 (8KB)
 : mem ( -- a ) $404000 ;
 : main ( -- )
-  1000 0 do i i 8 * mem + ! loop
+  100000 0 do
+    1000 0 do i i 8 * mem + ! loop
+  loop
   mem @ . cr ;

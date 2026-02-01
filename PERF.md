@@ -1,8 +1,8 @@
-# Fifth Native Compiler Performance Log
+# Sixth Native Compiler Performance Log
 
 ## Goal
 
-Compile Fifth directly to x86_64 machine code. No C. No assembler. Forth to binary.
+Compile Sixth directly to x86_64 machine code. No C. No assembler. Forth to binary.
 
 Measure against C compilers. Match them. Beat them.
 
@@ -11,9 +11,9 @@ Measure against C compilers. Match them. Beat them.
 | Date | Compiler | Time (s) | Loop Instructions | Notes |
 |------|----------|----------|-------------------|-------|
 | 2026-01-30 | GCC -O0 | 0.04 | 5 | Memory load/store every iteration |
-| 2026-01-30 | Fifth (original) | 0.04 | 12 | `dup 0= until` pattern |
-| 2026-01-30 | Fifth (nzloop) | 0.02 | 3 | `test rax; jnz` |
-| 2026-01-30 | Fifth (1-nzloop) | 0.02 | 2 | `dec rax; jnz` |
+| 2026-01-30 | Sixth (original) | 0.04 | 12 | `dup 0= until` pattern |
+| 2026-01-30 | Sixth (nzloop) | 0.02 | 3 | `test rax; jnz` |
+| 2026-01-30 | Sixth (1-nzloop) | 0.02 | 2 | `dec rax; jnz` |
 | 2026-01-30 | GCC -O1 | 0.02 | 2 | `sub eax; jne` |
 | 2026-01-30 | GCC -O2 | 0.00 | 0 | Loop eliminated entirely |
 
@@ -23,17 +23,17 @@ Measure against C compilers. Match them. Beat them.
 
 | Compiler | Time | vs GCC -O1 |
 |----------|------|------------|
-| Fifth (depth tracking) | 0.033s | 1.27x slower |
-| Fifth (NOS in rbx) | 0.065s | 2.5x slower |
+| Sixth (depth tracking) | 0.033s | 1.27x slower |
+| Sixth (NOS in rbx) | 0.065s | 2.5x slower |
 | GCC -O0 | 0.090s | 3.5x slower |
 | GCC -O1 | 0.026s | baseline |
 | GCC -O2 | 0.011s | 2.4x faster |
 
-**Fifth is 27% slower than GCC -O1.** Was 2.5x slower before depth tracking.
+**Sixth is 27% slower than GCC -O1.** Was 2.5x slower before depth tracking.
 
 ## Breakdown by Benchmark
 
-| Benchmark | Fifth | Fifth +<if | GCC -O1 | Status |
+| Benchmark | Sixth | Sixth +<if | GCC -O1 | Status |
 |-----------|-------|------------|---------|--------|
 | Loop | 0.021s | 0.021s | 0.021s | PARITY |
 | Fib | 0.044s | 0.035s | 0.029s | 20% slower |
@@ -54,12 +54,12 @@ Measure against C compilers. Match them. Beat them.
 
 | Compiler | Time (s) | Notes |
 |----------|----------|-------|
-| Fifth | 0.044 | Call overhead |
+| Sixth | 0.044 | Call overhead |
 | GCC -O0 | 0.035 | baseline |
 | GCC -O1 | 0.029 | |
 | GCC -O2 | 0.011 | Optimized |
 
-Fifth is 25% slower than GCC -O0 on recursive code. Call overhead dominates.
+Sixth is 25% slower than GCC -O0 on recursive code. Call overhead dominates.
 
 ## Benchmark
 
@@ -87,7 +87,7 @@ int main() {
 
 ## Generated Code Comparison
 
-### Fifth original (12 instructions)
+### Sixth original (12 instructions)
 ```asm
 loop:
   dec rax              ; 1-
@@ -104,7 +104,7 @@ loop:
   jz loop
 ```
 
-### Fifth nzloop (3 instructions)
+### Sixth nzloop (3 instructions)
 ```asm
 loop:
   dec rax              ; 1-
@@ -112,7 +112,7 @@ loop:
   jne loop
 ```
 
-### Fifth 1-nzloop (2 instructions)
+### Sixth 1-nzloop (2 instructions)
 ```asm
 loop:
   dec rax              ; 1-nzloop (dec sets ZF)
@@ -136,13 +136,13 @@ Identical hot path.
 | `1-nzloop` | ( n -- n-1 ) | 2 inst | Decrement and loop, dec sets flags |
 | `0=until` | ( n -- ) | 5 inst | Exit when TOS=0, consumes TOS |
 
-## Why Fifth Beats GCC -O0
+## Why Sixth Beats GCC -O0
 
 1. **TOS caching** - Top of stack lives in rax, not memory
 2. **No frame pointer** - No push rbp / mov rbp, rsp overhead
 3. **Register loops** - Counter stays in register, no load/store
 
-GCC -O0 loads and stores to `[rbp-4]` every iteration. Fifth keeps everything in rax.
+GCC -O0 loads and stores to `[rbp-4]` every iteration. Sixth keeps everything in rax.
 
 ## Architecture
 
@@ -228,7 +228,7 @@ bench/fib.c         - C equivalent
 ```bash
 # Compile and benchmark
 cp bench/loop-2inst.fs input.fs
-./fifth compiler/tf.fs
+./sixth compiler/sixth.fs
 chmod +x output
 time ./output
 

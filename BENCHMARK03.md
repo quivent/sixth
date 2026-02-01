@@ -1,4 +1,4 @@
-# Fifth Compiler Benchmark Results
+# Sixth Compiler Benchmark Results
 
 Date: 2026-01-31 03:18:32
 
@@ -1012,7 +1012,7 @@ Tests: 1000
 
 - **Correct (tf = gcc)**: 959
 - **Wrong output (tf != gcc)**: 5
-- **tf.fs no output**: 1
+- **sixth.fs no output**: 1
 - **C translation failed**: 0
 - **GCC compile/run failed**: 30
 - **Both no output**: 5
@@ -1028,7 +1028,7 @@ Tests: 1000
 | 801-neg1-2slash | `-1` | `0` |
 | 971-selection-sort4 | `20 30` | `10 40` |
 
-### tf.fs No Output (1 tests)
+### sixth.fs No Output (1 tests)
 
 | Test | Expected (gcc) |
 |------|----------------|
@@ -1036,9 +1036,9 @@ Tests: 1000
 
 ## Performance Summary
 
-- tf.fs avg compile: 4.547ms
+- sixth.fs avg compile: 4.547ms
 - gcc-O2 avg compile: 35.927ms
-- tf.fs avg runtime: 0.680ms
+- sixth.fs avg runtime: 0.680ms
 - gcc-O2 avg runtime: 1.209ms
 - Avg tf/gcc-O2 multiplier: 0.58x
 - Median tf/gcc-O2 multiplier: 0.57x

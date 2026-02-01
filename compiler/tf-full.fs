@@ -1,5 +1,5 @@
-\ tf.fs - Fifth to x86_64 ELF Compiler
-\ Compiles Fifth source directly to Linux ELF binary. No C, no cc.
+\ sixth.fs - Sixth to x86_64 ELF Compiler
+\ Compiles Sixth source directly to Linux ELF binary. No C, no cc.
 \ TOS cached in rax for speed (~40-50% of C).
 
 require ~/fifth/lib/core.fs
@@ -455,8 +455,8 @@ variable rest-len
 : main ( -- )
   ." [1]" cr
   argc 3 < if
-    ." tf - Fifth to x86_64 ELF (TOS cached)" cr
-    ." Usage: fifth tf.fs input.fs" cr
+    ." tf - Sixth to x86_64 ELF (TOS cached)" cr
+    ." Usage: fifth sixth.fs input.fs" cr
     bye
   then
   ." [2]" cr

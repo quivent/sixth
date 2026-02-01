@@ -1,7 +1,7 @@
-\ regress.fs - Fast tf.fs regression test
-\ Compiles each test with tf.fs, runs it, compares output to expected.
+\ regress.fs - Fast sixth.fs regression test
+\ Compiles each test with sixth.fs, runs it, compares output to expected.
 \ No GCC. No timing. Just correctness.
-\ Usage: ./fifth compiler/regress.fs
+\ Usage: ./sixth compiler/regress.fs
 \ ~10 seconds for 1050 tests.
 
 require lib/str.fs
@@ -90,9 +90,9 @@ variable last-slash
   dup 0= if 2drop 1 skip +! exit then
   parse-expect 0= if 1 skip +! exit then
 
-  \ Compile with tf.fs
+  \ Compile with sixth.fs
   str-reset
-  s" ./fifth compiler/tf.fs " str+
+  s" ./sixth compiler/sixth.fs " str+
   path$ str+
   s"  /tmp/_regress >/dev/null 2>&1" str+
   str$ system-rc

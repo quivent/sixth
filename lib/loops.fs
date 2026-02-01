@@ -13,7 +13,7 @@
 \ RULE: If you don't need `i`, don't use `do...loop`.
 
 \ ============================================================
-\ NOTE: >r and r> are NOT in native compiler (tf.fs)
+\ NOTE: >r and r> are NOT in native compiler (sixth.fs)
 \ ============================================================
 
 \ ============================================================

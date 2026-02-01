@@ -1,5 +1,5 @@
-\ bench.fs - tf.fs vs GCC -O0 -O1 -O2 -O3 benchmark
-\ Usage: ./fifth compiler/native/bench.fs [N]   N=1..5 (default 5)
+\ bench.fs - sixth.fs vs GCC -O0 -O1 -O2 -O3 benchmark
+\ Usage: ./sixth compiler/native/bench.fs [N]   N=1..5 (default 5)
 
 \ Missing words
 : >= ( a b -- flag ) < 0= ;
@@ -124,7 +124,7 @@ variable t0
 variable cur-opt   \ ascii '0'..'3'
 
 : tf-cc ( -- addr u )
-  c0 s" ./fifth compiler/tf.fs /tmp/fb/" c+ bn$ c+ s" .fs /tmp/fb/" c+ bn$ c+ s" _tf 2>/dev/null" c+ c$ ;
+  c0 s" ./sixth compiler/sixth.fs /tmp/fb/" c+ bn$ c+ s" .fs /tmp/fb/" c+ bn$ c+ s" _tf 2>/dev/null" c+ c$ ;
 
 : tf-rc ( -- addr u )
   c0 s" /tmp/fb/" c+ bn$ c+ s" _tf >/tmp/fb/" c+ bn$ c+ s" _tf.out 2>/dev/null" c+ c$ ;
@@ -162,9 +162,9 @@ create bt 10 cells allot   \ 5 compilers x (compile, run)
 
 : .header
   cr
-  ." Fifth tf.fs vs GCC     (times in seconds)" cr
+  ." Sixth sixth.fs vs GCC     (times in seconds)" cr
   cr
-  ."               " .sep ."  tf.fs      " .sep ."  gcc -O0    " .sep ."  gcc -O1    " .sep ."  gcc -O2    " .sep ."  gcc -O3    " cr
+  ."               " .sep ."  sixth.fs      " .sep ."  gcc -O0    " .sep ."  gcc -O1    " .sep ."  gcc -O2    " .sep ."  gcc -O3    " cr
   ."  benchmark    " .sep ."  comp   run " .sep ."  comp   run " .sep ."  comp   run " .sep ."  comp   run " .sep ."  comp   run " cr
   ." ──────────────┼─────────────┼─────────────┼─────────────┼─────────────┼─────────────" cr ;
 
