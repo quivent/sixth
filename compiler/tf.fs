@@ -28,6 +28,44 @@
 \
 \   6. REGISTER-BASED STACK - stack-depth tracks TOS in rax/rbx/rcx/memory.
 \      Avoids memory traffic for shallow stacks (depth <= 3).
+\
+\   7. SWAP ABSORPTION - Deferred swap cancels or absorbs into next op.
+\      swap swap → nop. swap 1+ → inc rbx (operate on NOS, keep swapped).
+\      Same for 1- (dec rbx), negate (neg rbx). Binary ops (+, -, etc.)
+\      absorb swap by clearing swap-pending (operands are commutative in regs).
+\      Impl: swap-pending variable, swap toggle in compile-builtin $swap,
+\            rbx opcodes in $1+/$1-/$negate handlers, flush-cmp calls in
+\            all binary/unary op handlers to flush dup-pending before absorbing.
+\      CRITICAL: swap-pending stays SET after absorbing into 1+/1-/negate.
+\      The registers are still logically swapped. Only a second swap clears it.
+\
+\   8. PEEPHOLE: DUP+CMP+WHILE/UNTIL FUSION - Fuses dup 0> while into one branch.
+\      dup 0> while → test rax,rax; jle forward (3+6=9 bytes, no dup/cmp overhead).
+\      Works for 0=, 0>, 0<. Skips test if last insn was dec/inc (flags already set).
+\      dup without following cmp is preserved (emitted in non-fused path).
+\      Impl: dup-pending, cmp-pending variables. flush-cmp emits deferred dup+cmp.
+\            $dup sets dup-pending. $0>/$0=/$0< save dup-pending into cmp-pending.
+\            $while/$until save both, take fused path if cmp-pending != 0.
+\            gen-while-fused, gen-until-fused: emit condition + forward/backward jmp.
+\            last-sets-flags?: detects dec/inc rax, skips redundant test rax,rax.
+\      CRITICAL: while/until save dup-pending BEFORE flush-swap clears it.
+\      Non-fused path must emit gen-dup if dup was pending (dup while without cmp).
+\      Tests: 325-gcd, 861-peep-while-count, 950-multi-while-seq, 990-sum-1to100
+\
+\   9. WHILE/REPEAT FUSION + LOOP ELIMINATION - Three levels of optimization:
+\      a) BACKWARD FUSION: adjacent while+repeat (no body between them) fuses
+\         forward-jcc + jmp-backward into single backward-jcc. Inverts condition
+\         byte (XOR 1: jle→jg, jnz→jz, jns→js). Saves 5 bytes + 1 branch/iter.
+\      b) COUNTDOWN ELIMINATION: begin 1- dup 0> while repeat → xor eax,eax.
+\         Recognizes 3-byte body (48 ff c8 = dec rax) as pure countdown-to-zero.
+\      c) NOS++ ELIMINATION: begin swap 1+ swap 1- dup 0> while repeat
+\         → add rbx,rax; xor eax,eax. Recognizes 6-byte body
+\         (48 ff c3 48 ff c8 = inc rbx; dec rax) as accumulate+countdown.
+\      Impl: gen-repeat checks code-here == orig (adjacent), then body-size
+\            and byte patterns. Uses dup code-buf + >r / r@ for byte reads.
+\      Result: arith-std 228ms→1ms, loop-std 222ms→1ms. Matches gcc -O2.
+\      CRITICAL: byte reads use (dup code-buf +), NOT (code-buf dup +).
+\      Stack is (orig dest). dup copies dest (TOS). over copies orig (wrong).
 
 \ ============================================================
 \ MISSING WORDS
@@ -67,7 +105,16 @@ variable cf-sp  0 cf-sp !
 
 \ Data segment allocation (variables, create/allot)
 $40A000 constant DATA-BASE
-variable data-here  DATA-BASE data-here !
+\ Reserved data segment layout:
+\   +0:   base variable (8 bytes, initialized to 10)
+\   +8:   pno-pos variable (8 bytes)
+\   +16:  pno-buf (128 bytes)
+\   +144: user data starts here
+DATA-BASE constant rt-base         \ runtime address of base variable
+DATA-BASE 8 + constant rt-pno-pos  \ runtime address of pno position
+DATA-BASE 16 + constant rt-pno-buf \ runtime address of PNO buffer (128 bytes)
+128 constant PNO-SIZE
+variable data-here  DATA-BASE 144 + data-here !
 
 \ Compilation state
 variable state  0 state !   \ 0=interpret, 1=compile
@@ -88,6 +135,9 @@ variable arg-count    1 arg-count !     \ number of input arguments (from stack 
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
 variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
 variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit cleanup)
+create do-trip 8 cells allot              \ known trip count per nesting level (-1=unknown)
+create do-origin 8 cells allot            \ code-here before gen-do emitted anything
+create do-sdepth 8 cells allot            \ stack-depth before gen-do
 
 \ Compile-time constant stack for literal folding/fusion
 create ct-stack 8 cells allot
@@ -333,6 +383,93 @@ variable fixup-target  0 fixup-target !
 
 : gen-2drop ( -- )  pop-tos pop-tos ;
 
+: gen--rot ( -- )  gen-rot gen-rot ;
+
+: gen-?dup ( -- )
+  \ ( x -- x x | 0 ) test rax; if nonzero, dup
+  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $74 c,                          \ jz (skip push-tos)
+  code-here 0 c,                  \ save offset addr, emit placeholder
+  push-tos
+  code-here over - 1-             \ skip distance = bytes emitted by push-tos
+  swap code-buf + c! ;            \ patch jz offset
+
+: gen-2swap ( -- )
+  \ ( a b c d -- c d a b ) d=rax, c=rbx, b=rcx, a=[r15]
+  $48 c, $87 c, $c1 c,           \ xchg rax, rcx  (rax=b, rcx=d)
+  $49 c, $87 c, $1f c, ;         \ xchg rbx, [r15] (rbx=a, [r15]=c)
+
+: gen-space ( -- )
+  \ emit space character via write syscall
+  1 has-io !
+  stack-depth @ 2 >= if $53 c, then
+  stack-depth @ 3 >= if $51 c, then
+  $6a c, 32 c,                   \ push 32
+  $b8 c, 1 d,                    \ mov eax, 1 (sys_write)
+  $bf c, 1 d,                    \ mov edi, 1 (stdout)
+  $48 c, $89 c, $e6 c,           \ mov rsi, rsp
+  $ba c, 1 d,                    \ mov edx, 1
+  $0f c, $05 c,                  \ syscall
+  $58 c,                         \ pop scratch
+  stack-depth @ 3 >= if $59 c, then
+  stack-depth @ 2 >= if $5b c, then ;
+
+: gen-move ( -- )
+  \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
+  \ rsi/rdi are free (not used by stack machine)
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,         \ mov rsi, rcx (src from 3rd reg)
+  else
+    $49 c, $8b c, $37 c,         \ mov rsi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
+  then
+  $48 c, $89 c, $df c,           \ mov rdi, rbx (dst)
+  $48 c, $89 c, $c1 c,           \ mov rcx, rax (count)
+  $f3 c, $a4 c,                  \ rep movsb
+  \ Promote remaining items into registers
+  stack-depth @ 4 >= if
+    $49 c, $8b c, $07 c,           \ mov rax, [r15]
+    stack-depth @ 5 >= if
+      $49 c, $8b c, $5f c, 8 c,    \ mov rbx, [r15+8]
+      stack-depth @ 6 >= if
+        $49 c, $8b c, $4f c, 16 c,   \ mov rcx, [r15+16]
+      then
+    then
+    stack-depth @ 3 - dup 3 > if drop 3 then 8 *
+    dup 0> if
+      $49 c, $83 c, $c7 c, c,      \ add r15, N*8
+    else drop then
+  then
+  -3 stack-depth +! ;
+
+: gen-fill ( -- )
+  \ ( addr u char -- ) char=rax, u=rbx, addr=rcx or [r15]
+  \ rdi is free
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $cf c,         \ mov rdi, rcx (addr from 3rd reg)
+  else
+    $49 c, $8b c, $3f c,         \ mov rdi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
+  then
+  $48 c, $89 c, $d9 c,           \ mov rcx, rbx (count)
+  \ rax already has char (al used by stosb)
+  $f3 c, $aa c,                  \ rep stosb
+  \ Promote remaining items (same pattern as move)
+  stack-depth @ 4 >= if
+    $49 c, $8b c, $07 c,
+    stack-depth @ 5 >= if
+      $49 c, $8b c, $5f c, 8 c,
+      stack-depth @ 6 >= if
+        $49 c, $8b c, $4f c, 16 c,
+      then
+    then
+    stack-depth @ 3 - dup 3 > if drop 3 then 8 *
+    dup 0> if
+      $49 c, $83 c, $c7 c, c,
+    else drop then
+  then
+  -3 stack-depth +! ;
+
 \ ============================================================
 \ ARITHMETIC
 \ ============================================================
@@ -343,6 +480,9 @@ variable fixup-target  0 fixup-target !
   $48 c, $29 c, $c3 c,
   $48 c, $89 c, $d8 c,
   pop-nos ;
+
+\ reverse subtract: TOS - NOS (swap sub optimization)
+: gen-rsub ( -- )  $48 c, $29 c, $d8 c,  pop-nos ;
 
 : gen-mul ( -- )  $48 c, $0f c, $af c, $c3 c,  pop-nos ;
 
@@ -371,6 +511,32 @@ variable fixup-target  0 fixup-target !
 : gen-nos+ ( -- )  $48 c, $ff c, $c3 c, ;
 
 variable nos+-pending  0 nos+-pending !
+variable swap-pending  0 swap-pending !
+
+\ OPTIMIZATION 8: dup + comparison + while/until fusion (see header)
+\ DO NOT REMOVE. Removing breaks all begin/while/repeat and begin/until loops.
+\ cmp-pending: 0=none, 1=0=, 2=0>, 3=0<
+variable dup-pending   0 dup-pending !
+variable cmp-pending   0 cmp-pending !
+
+: flush-cmp ( -- )
+  cmp-pending @ ?dup if
+    gen-dup  \ the deferred dup
+    dup 1 = if  \ 0= inline
+      $48 c, $85 c, $c0 c, $0f c, $94 c, $c0 c,
+      $48 c, $0f c, $b6 c, $c0 c, $48 c, $f7 c, $d8 c, then
+    dup 2 = if  \ 0> inline
+      $48 c, $85 c, $c0 c, $0f c, $9f c, $c0 c,
+      $48 c, $0f c, $b6 c, $c0 c, $48 c, $f7 c, $d8 c, then
+        3 = if  \ 0< inline
+      $48 c, $c1 c, $f8 c, 63 c, then
+    0 cmp-pending !
+  then
+  dup-pending @ if gen-dup  0 dup-pending ! then ;
+
+: flush-swap ( -- )
+  flush-cmp
+  swap-pending @ if gen-swap  0 swap-pending ! then ;
 
 : gen-2+ ( -- )  $48 c, $83 c, $c0 c, 2 c, ;
 : gen-2- ( -- )  $48 c, $83 c, $e8 c, 2 c, ;
@@ -838,6 +1004,43 @@ variable nos+-pending  0 nos+-pending !
   $0f c, $85 c,
   code-here 4 + - d, ;
 
+\ OPTIMIZATION 8+9: flag elision and loop fusion (see header)
+\ DO NOT REMOVE or reorder any of: last-sets-flags?, gen-while-fused,
+\ gen-until-fused, gen-repeat. They form one interlocking optimization.
+\ last-sets-flags? lets gen-while-fused skip redundant test rax,rax.
+\ gen-repeat fuses while+repeat and eliminates countdown loops.
+: last-sets-flags? ( -- flag )
+  code-here 3 < if 0 exit then
+  code-buf code-here 3 - + c@ $48 <> if 0 exit then
+  code-buf code-here 2 - + c@ $ff <> if 0 exit then
+  code-buf code-here 1 - + c@ dup $c8 = swap $c0 = or ;
+
+\ Fused while: conditional forward jump (skip test if dec/inc already set flags)
+\ cmp=1(0=): exit if NOT zero → jnz
+\ cmp=2(0>): exit if NOT >0   → jle
+\ cmp=3(0<): exit if NOT <0   → jge
+: gen-while-fused ( dest cmp -- orig dest )
+  last-sets-flags? 0= if $48 c, $85 c, $c0 c, then  \ test rax,rax (skip if flags set)
+  dup 1 = if drop $0f c, $85 c, else  \ jnz (exit when not-zero, i.e. 0= failed)
+  dup 2 = if drop $0f c, $8e c, else  \ jle (exit when <=0, i.e. 0> failed)
+      3 = if   $0f c, $89 c,          \ jns/jge (exit when >=0, i.e. 0< failed)
+  then then then
+  0 d,
+  code-here swap ;
+
+\ Fused until: conditional backward jump when condition is FALSE (skip test if flags set)
+\ (until loops when false, exits when true)
+\ cmp=1(0=): loop while not-zero → jnz
+\ cmp=2(0>): loop while <=0      → jle
+\ cmp=3(0<): loop while >=0      → jge
+: gen-until-fused ( dest cmp -- )
+  last-sets-flags? 0= if $48 c, $85 c, $c0 c, then  \ test rax,rax (skip if flags set)
+  dup 1 = if drop $0f c, $85 c, else  \ jnz
+  dup 2 = if drop $0f c, $8e c, else  \ jle
+      3 = if   $0f c, $8d c,          \ jge
+  then then then
+  code-here 4 + - d, ;
+
 : gen-while ( dest -- orig dest )
   $48 c, $89 c, $c7 c,
   pop-tos
@@ -846,7 +1049,38 @@ variable nos+-pending  0 nos+-pending !
   0 d,
   code-here swap ;
 
+\ OPTIMIZATION 9: while/repeat fusion + loop elimination (see header)
+\ DO NOT CHANGE byte-read pattern. dup copies dest (TOS), NOT orig.
+\ (code-buf dup +) is WRONG — gives code-buf+code-buf. (dup code-buf +) is RIGHT.
 : gen-repeat ( orig dest -- )
+  over code-here = if
+    \ Adjacent while/repeat: check for loop elimination
+    \ Body is from dest to conditional jump (6 bytes before orig)
+    over 6 - over -   ( orig dest body-size )
+    dup 3 = if drop
+      \ Check if body is dec rax (48 ff c8) = pure countdown
+      dup code-buf + >r
+      r@ c@ $48 =  r@ 1+ c@ $ff = and  r@ 2 + c@ $c8 = and
+      r> drop if
+        nip code-pos !  $31 c, $c0 c,  exit  \ xor eax,eax
+      then
+    else dup 6 = if drop
+      \ Check if body is inc rbx; dec rax (nos++ countdown)
+      dup code-buf + >r
+      r@ c@ $48 =  r@ 1+ c@ $ff = and  r@ 2 + c@ $c3 = and
+      r@ 3 + c@ $48 = and  r@ 4 + c@ $ff = and  r@ 5 + c@ $c8 = and
+      r> drop if
+        nip code-pos !
+        $48 c, $01 c, $c3 c,  $31 c, $c0 c,  exit  \ add rbx,rax; xor eax,eax
+      then
+    else drop then then
+    \ Not eliminated: fuse into backward conditional jump
+    \ Invert condition byte at orig-5 (0f XX → 0f XX^1)
+    over 5 - code-buf + dup c@ 1 xor swap c!
+    \ Patch displacement to jump backward to dest
+    swap 4 - patch-rel32
+    exit
+  then
   $e9 c,
   code-here 4 + - d,
   code-here swap 4 - patch-rel32 ;
@@ -918,7 +1152,24 @@ variable call-rets   1 call-rets !
   code-here cf-push ;
 
 : gen-loop ( -- )
-  cf-pop
+  cf-pop  ( loop-start )
+  \ OPTIMIZATION 10: do/loop elimination for constant-trip 1+ loops.
+  \ If body is inc rax (48 ff c0) and trip count is known, replace with add rax, N.
+  do-depth @ 1- cells do-trip + @ dup -1 <> over 0> and if  ( loop-start trip )
+    over code-here swap - 3 = if      ( loop-start trip )
+      over code-buf + >r
+      r@ c@ $48 =  r@ 1+ c@ $ff = and  r@ 2 + c@ $c0 = and
+      r> drop if
+        nip  ( trip )
+        do-depth @ 1- cells do-origin + @ code-pos !
+        do-depth @ 1- cells do-sdepth + @ stack-depth !
+        cf-pop drop
+        gen-add-imm
+        -1 do-depth +! exit
+      then
+    then drop               ( loop-start )
+  else drop then            ( loop-start )
+  \ Normal loop: inc r12, cmp, jl back
   $49 c, $ff c, $c4 c,
   $4d c, $39 c, $ec c,
   $0f c, $8c c,
@@ -1125,6 +1376,82 @@ variable start-jmp
   gen-type ;
 
 \ ============================================================
+\ PICTURED NUMERIC OUTPUT
+\ ============================================================
+\ Runtime layout: rt-base(8), rt-pno-pos(8), rt-pno-buf(128) at DATA-BASE
+
+: gen-base ( -- )
+  \ Push address of base variable
+  push-tos
+  $48 c, $b8 c, rt-base q, ;            \ mov rax, rt-base
+
+: gen-<# ( -- )
+  \ Store 128 into pno-pos
+  $48 c, $c7 c, $04 c, $25 c,            \ mov qword [rt-pno-pos], 128
+  rt-pno-pos d, PNO-SIZE d, ;
+
+: gen-hold ( -- )
+  \ ( char -- ) decrement pno-pos, store char. Uses rdi (free reg).
+  $48 c, $8b c, $3c c, $25 c, rt-pno-pos d,  \ mov rdi, [rt-pno-pos]
+  $48 c, $ff c, $cf c,                        \ dec rdi
+  $48 c, $89 c, $3c c, $25 c, rt-pno-pos d,  \ mov [rt-pno-pos], rdi
+  $48 c, $81 c, $c7 c, rt-pno-buf d,         \ add rdi, rt-pno-buf (imm32)
+  $40 c, $88 c, $07 c,                        \ mov [rdi], al
+  pop-tos ;
+
+: gen-sign ( -- )
+  \ ( n -- ) if n < 0, hold '-'. Uses rdi (free reg).
+  $48 c, $85 c, $c0 c,                  \ test rax, rax
+  $79 c, 0 c, code-here >r              \ jns skip (patch later)
+  \ negative: decrement pno-pos, store '-'
+  $48 c, $8b c, $3c c, $25 c, rt-pno-pos d,  \ mov rdi, [rt-pno-pos]
+  $48 c, $ff c, $cf c,                        \ dec rdi
+  $48 c, $89 c, $3c c, $25 c, rt-pno-pos d,  \ mov [rt-pno-pos], rdi
+  $48 c, $81 c, $c7 c, rt-pno-buf d,         \ add rdi, rt-pno-buf (imm32)
+  $c6 c, $07 c, 45 c,                         \ mov byte [rdi], '-'
+  code-here r@ - r> 1- code-buf + c!           \ patch jns offset (relative)
+  pop-tos ;
+
+: gen-# ( -- )
+  \ ( ud-lo ud-hi -- ud-lo' ud-hi' ) double-cell divide by base, hold remainder
+  \ rax=d-hi(TOS), rbx=d-lo(NOS). Uses rsi for base, rdi for buffer. No rcx touch.
+  $48 c, $31 c, $d2 c,                        \ xor rdx, rdx
+  $48 c, $8b c, $34 c, $25 c, rt-base d,     \ mov rsi, [rt-base]
+  $48 c, $f7 c, $f6 c,                        \ div rsi (0:d-hi/base → rax=hi-quot, rdx=hi-rem)
+  $48 c, $87 c, $c3 c,                        \ xchg rax, rbx (rax=d-lo, rbx=hi-quot)
+  $48 c, $f7 c, $f6 c,                        \ div rsi (hi-rem:d-lo/base → rax=lo-quot, rdx=rem)
+  $48 c, $87 c, $c3 c,                        \ xchg rax, rbx (rax=hi-quot=TOS, rbx=lo-quot=NOS)
+  \ Convert remainder to ASCII and hold
+  $80 c, $c2 c, 48 c,                         \ add dl, '0'
+  $80 c, $fa c, 58 c,                         \ cmp dl, '9'+1
+  $72 c, 3 c,                                 \ jb skip
+  $80 c, $c2 c, 7 c,                          \ add dl, 'A'-'9'-1 (=7) for hex
+  \ Decrement pno-pos, store digit using rdi
+  $48 c, $8b c, $3c c, $25 c, rt-pno-pos d,  \ mov rdi, [rt-pno-pos]
+  $48 c, $ff c, $cf c,                        \ dec rdi
+  $48 c, $89 c, $3c c, $25 c, rt-pno-pos d,  \ mov [rt-pno-pos], rdi
+  $48 c, $81 c, $c7 c, rt-pno-buf d,         \ add rdi, rt-pno-buf (imm32)
+  $88 c, $17 c, ;                              \ mov [rdi], dl
+
+: gen-#s ( -- )
+  \ ( ud-lo ud-hi -- 0 0 ) loop: # until both cells are 0
+  code-here                                    \ loop target
+  gen-#
+  $48 c, $89 c, $c7 c,                        \ mov rdi, rax (save hi)
+  $48 c, $09 c, $d8 c,                        \ or rax, rbx (test both cells)
+  $48 c, $89 c, $f8 c,                        \ mov rax, rdi (restore hi)
+  $75 c,                                       \ jnz back
+  dup code-here 1+ - c, drop ;                \ patch relative offset
+
+: gen-#> ( -- )
+  \ ( ud-lo ud-hi -- addr u ) replace double with string addr and len
+  \ rax=hi(TOS→len), rbx=lo(NOS→addr)
+  $48 c, $bb c, rt-pno-buf q,                 \ mov rbx, rt-pno-buf
+  $48 c, $03 c, $1c c, $25 c, rt-pno-pos d,  \ add rbx, [rt-pno-pos] (NOS=addr)
+  $48 c, $c7 c, $c0 c, PNO-SIZE d,            \ mov rax, 128
+  $48 c, $2b c, $04 c, $25 c, rt-pno-pos d, ; \ sub rax, [rt-pno-pos] (TOS=len)
+
+\ ============================================================
 \ STRING COMPARE
 \ ============================================================
 
@@ -1248,6 +1575,20 @@ s" fm/mod" s, 2constant $fm/mod
 s" d+" s, 2constant $d+
 s" d-" s, 2constant $d-
 s" ," s, 2constant $,
+s" space" s, 2constant $space
+s" -rot" s, 2constant $-rot
+s" ?dup" s, 2constant $?dup
+s" 2swap" s, 2constant $2swap
+s" move" s, 2constant $move
+s" fill" s, 2constant $fill
+s" [char]" s, 2constant $[char]
+s" base" s, 2constant $base
+s" <#" s, 2constant $<#
+s" hold" s, 2constant $hold
+s" sign" s, 2constant $sign
+s" #" s, 2constant $#
+s" #s" s, 2constant $#s
+s" #>" s, 2constant $#>
 s" :" s, 2constant $:
 s" ;" s, 2constant $;
 s" main" s, 2constant $main
@@ -1398,143 +1739,217 @@ variable num-neg
 \ For everything else: ct-flush first, then normal codegen.
 : compile-builtin ( addr u -- found? )
   \ ---- Stack manipulation: flush ct-stack first ----
-  2dup $dup str= if 2drop ct-flush gen-dup true exit then
-  2dup $dup2 str= if 2drop ct-flush gen-dup2 true exit then
-  2dup $drop str= if 2drop
+  2dup $dup str= if 2drop flush-swap ct-flush
+    1 dup-pending ! true exit then
+  2dup $dup2 str= if 2drop flush-swap ct-flush gen-dup2 true exit then
+  2dup $drop str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop drop else ct-flush gen-drop then
     true exit then
-  2dup $swap str= if 2drop ct-flush gen-swap true exit then
-  2dup $over str= if 2drop ct-flush gen-over true exit then
-  2dup $rot str= if 2drop ct-flush gen-rot true exit then
-  2dup $nip str= if 2drop ct-flush gen-nip true exit then
-  2dup $tuck str= if 2drop ct-flush gen-tuck true exit then
-  2dup $2dup str= if 2drop ct-flush gen-2dup true exit then
-  2dup $2drop str= if 2drop ct-flush gen-2drop true exit then
+  2dup $swap str= if 2drop ct-flush
+    swap-pending @ if  0 swap-pending !
+    else  1 swap-pending !
+    then true exit then
+  2dup $over str= if 2drop flush-swap ct-flush gen-over true exit then
+  2dup $rot str= if 2drop flush-swap ct-flush gen-rot true exit then
+  2dup $nip str= if 2drop flush-swap ct-flush gen-nip true exit then
+  2dup $tuck str= if 2drop flush-swap ct-flush gen-tuck true exit then
+  2dup $2dup str= if 2drop flush-swap ct-flush gen-2dup true exit then
+  2dup $2drop str= if 2drop flush-swap ct-flush gen-2drop true exit then
+  2dup $-rot str= if 2drop flush-swap ct-flush gen--rot true exit then
+  2dup $?dup str= if 2drop flush-swap ct-flush gen-?dup true exit then
+  2dup $2swap str= if 2drop flush-swap ct-flush gen-2swap true exit then
   \ ---- Binary arithmetic with fold/fuse ----
-  2dup $+ str= if 2drop
+  2dup $+ str= if 2drop flush-cmp
+    ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop + ct-push
     else ct-depth @ 1 = if ct-pop flush-pending gen-add-imm
     else flush-pending gen-add then then true exit then
-  2dup $- str= if 2drop
-    ct-depth @ 2 >= if ct-pop ct-pop swap - ct-push
-    else ct-depth @ 1 = if ct-pop flush-pending gen-sub-imm
-    else flush-pending gen-sub then then true exit then
-  2dup $* str= if 2drop
+  2dup $- str= if 2drop flush-cmp
+    swap-pending @ if
+      ct-depth @ 0= if
+        0 swap-pending ! flush-pending gen-rsub
+      else flush-swap
+        ct-depth @ 2 >= if ct-pop ct-pop swap - ct-push
+        else ct-depth @ 1 = if ct-pop flush-pending gen-sub-imm
+        else flush-pending gen-sub then then
+      then
+    else
+      ct-depth @ 2 >= if ct-pop ct-pop swap - ct-push
+      else ct-depth @ 1 = if ct-pop flush-pending gen-sub-imm
+      else flush-pending gen-sub then then
+    then true exit then
+  2dup $* str= if 2drop flush-cmp
+    ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop * ct-push
     else ct-depth @ 1 = if ct-pop flush-pending gen-mul-imm
     else flush-pending gen-mul then then true exit then
-  2dup $/ str= if 2drop
+  2dup $/ str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap / ct-push
     else ct-flush flush-pending gen-div then true exit then
-  2dup $mod str= if 2drop
+  2dup $mod str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap mod ct-push
     else ct-flush flush-pending gen-mod then true exit then
   \ ---- Unary arithmetic with fold ----
-  2dup $negate str= if 2drop
-    ct-depth @ 0> if ct-pop negate ct-push else gen-negate then true exit then
-  2dup $1+ str= if 2drop
-    ct-depth @ 0> if ct-pop 1+ ct-push else gen-1+ then true exit then
-  2dup $1- str= if 2drop
-    ct-depth @ 0> if ct-pop 1- ct-push else gen-1- then true exit then
-  2dup $nos+ str= if 2drop ct-flush gen-nos+ true exit then
-  2dup $2+ str= if 2drop
+  2dup $negate str= if 2drop flush-cmp
+    swap-pending @ if
+      ct-depth @ 0> if ct-pop negate ct-push else $48 c, $f7 c, $db c, then
+    else
+      ct-depth @ 0> if ct-pop negate ct-push else gen-negate then
+    then true exit then
+  \ OPTIMIZATION 7: swap absorption for 1+/1- (see header)
+  \ swap-pending: inc/dec rbx instead of rax. DO NOT clear swap-pending here.
+  \ Registers are still logically swapped after absorbing.
+  2dup $1+ str= if 2drop flush-cmp
+    swap-pending @ if
+      ct-depth @ 0> if ct-pop 1+ ct-push else $48 c, $ff c, $c3 c, then  \ inc rbx
+    else
+      ct-depth @ 0> if ct-pop 1+ ct-push else gen-1+ then
+    then true exit then
+  2dup $1- str= if 2drop flush-cmp
+    swap-pending @ if
+      ct-depth @ 0> if ct-pop 1- ct-push else $48 c, $ff c, $cb c, then  \ dec rbx
+    else
+      ct-depth @ 0> if ct-pop 1- ct-push else gen-1- then
+    then true exit then
+  2dup $nos+ str= if 2drop flush-swap ct-flush gen-nos+ true exit then
+  2dup $2+ str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop 2 + ct-push else gen-2+ then true exit then
-  2dup $2- str= if 2drop
+  2dup $2- str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop 2 - ct-push else gen-2- then true exit then
-  2dup $tuck+ str= if 2drop ct-flush gen-tuck+ true exit then
+  2dup $tuck+ str= if 2drop flush-swap ct-flush gen-tuck+ true exit then
   \ ---- Bitwise with fold/fuse ----
-  2dup $and str= if 2drop
+  2dup $and str= if 2drop flush-cmp
+    ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop and ct-push
     else ct-depth @ 1 = if ct-pop flush-pending gen-and-imm
     else flush-pending gen-and then then true exit then
-  2dup $or str= if 2drop
+  2dup $or str= if 2drop flush-cmp
+    ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop or ct-push
     else ct-depth @ 1 = if ct-pop flush-pending gen-or-imm
     else flush-pending gen-or then then true exit then
-  2dup $xor str= if 2drop
+  2dup $xor str= if 2drop flush-cmp
+    ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop xor ct-push
     else ct-depth @ 1 = if ct-pop flush-pending gen-xor-imm
     else flush-pending gen-xor then then true exit then
-  2dup $invert str= if 2drop
+  2dup $invert str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop invert ct-push else gen-invert then true exit then
-  2dup $abs str= if 2drop
+  2dup $abs str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop abs ct-push else gen-abs then true exit then
-  2dup $2* str= if 2drop
+  2dup $2* str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop 2 * ct-push else gen-2* then true exit then
-  2dup $2/ str= if 2drop
+  2dup $2/ str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop 2 / ct-push else gen-2/ then true exit then
   \ ---- Comparison: flush, then normal ----
-  2dup $= str= if 2drop ct-flush flush-pending gen-= true exit then
-  2dup $<> str= if 2drop ct-flush flush-pending gen-<> true exit then
-  2dup $< str= if 2drop ct-flush flush-pending gen-< true exit then
-  2dup $> str= if 2drop ct-flush flush-pending gen-> true exit then
-  2dup $<= str= if 2drop ct-flush flush-pending gen-<= true exit then
-  2dup $>= str= if 2drop ct-flush flush-pending gen->= true exit then
-  2dup $0= str= if 2drop ct-flush flush-pending gen-0= true exit then
-  2dup $0< str= if 2drop ct-flush flush-pending gen-0< true exit then
-  2dup $0> str= if 2drop ct-flush flush-pending gen-0> true exit then
-  2dup $min str= if 2drop ct-flush flush-pending gen-min true exit then
-  2dup $max str= if 2drop ct-flush flush-pending gen-max true exit then
-  2dup $lshift str= if 2drop ct-flush flush-pending gen-lshift true exit then
-  2dup $rshift str= if 2drop ct-flush flush-pending gen-rshift true exit then
+  2dup $= str= if 2drop flush-swap ct-flush flush-pending gen-= true exit then
+  2dup $<> str= if 2drop flush-swap ct-flush flush-pending gen-<> true exit then
+  2dup $< str= if 2drop flush-swap ct-flush flush-pending gen-< true exit then
+  2dup $> str= if 2drop flush-swap ct-flush flush-pending gen-> true exit then
+  2dup $<= str= if 2drop flush-swap ct-flush flush-pending gen-<= true exit then
+  2dup $>= str= if 2drop flush-swap ct-flush flush-pending gen->= true exit then
+  2dup $0= str= if 2drop dup-pending @ 0 dup-pending !
+    flush-swap ct-flush flush-pending
+    if 1 cmp-pending ! else gen-0= then true exit then
+  2dup $0< str= if 2drop dup-pending @ 0 dup-pending !
+    flush-swap ct-flush flush-pending
+    if 3 cmp-pending ! else gen-0< then true exit then
+  2dup $0> str= if 2drop dup-pending @ 0 dup-pending !
+    flush-swap ct-flush flush-pending
+    if 2 cmp-pending ! else gen-0> then true exit then
+  2dup $min str= if 2drop flush-swap ct-flush flush-pending gen-min true exit then
+  2dup $max str= if 2drop flush-swap ct-flush flush-pending gen-max true exit then
+  2dup $lshift str= if 2drop flush-swap ct-flush flush-pending gen-lshift true exit then
+  2dup $rshift str= if 2drop flush-swap ct-flush flush-pending gen-rshift true exit then
   \ ---- Double-cell: flush, then normal ----
-  2dup $s>d str= if 2drop ct-flush flush-pending gen-s>d true exit then
-  2dup $um* str= if 2drop ct-flush flush-pending gen-um* true exit then
-  2dup $m* str= if 2drop ct-flush flush-pending gen-m* true exit then
-  2dup $um/mod str= if 2drop ct-flush flush-pending gen-um/mod true exit then
-  2dup $sm/rem str= if 2drop ct-flush flush-pending gen-sm/rem true exit then
-  2dup $fm/mod str= if 2drop ct-flush flush-pending gen-fm/mod true exit then
-  2dup $d+ str= if 2drop ct-flush flush-pending gen-d+ true exit then
-  2dup $d- str= if 2drop ct-flush flush-pending gen-d- true exit then
+  2dup $s>d str= if 2drop flush-swap ct-flush flush-pending gen-s>d true exit then
+  2dup $um* str= if 2drop flush-swap ct-flush flush-pending gen-um* true exit then
+  2dup $m* str= if 2drop flush-swap ct-flush flush-pending gen-m* true exit then
+  2dup $um/mod str= if 2drop flush-swap ct-flush flush-pending gen-um/mod true exit then
+  2dup $sm/rem str= if 2drop flush-swap ct-flush flush-pending gen-sm/rem true exit then
+  2dup $fm/mod str= if 2drop flush-swap ct-flush flush-pending gen-fm/mod true exit then
+  2dup $d+ str= if 2drop flush-swap ct-flush flush-pending gen-d+ true exit then
+  2dup $d- str= if 2drop flush-swap ct-flush flush-pending gen-d- true exit then
   \ ---- Memory: flush, then normal ----
-  2dup $@ str= if 2drop ct-flush gen-@ true exit then
-  2dup $! str= if 2drop ct-flush flush-pending gen-! true exit then
-  2dup $c@ str= if 2drop ct-flush gen-c@ true exit then
-  2dup $c! str= if 2drop ct-flush flush-pending gen-c! true exit then
-  2dup $+! str= if 2drop ct-flush flush-pending gen-+! true exit then
-  2dup $cells str= if 2drop ct-flush gen-cells true exit then
-  2dup $cell+ str= if 2drop ct-flush gen-cell+ true exit then
+  2dup $@ str= if 2drop flush-swap ct-flush gen-@ true exit then
+  2dup $! str= if 2drop flush-swap ct-flush flush-pending gen-! true exit then
+  2dup $c@ str= if 2drop flush-swap ct-flush gen-c@ true exit then
+  2dup $c! str= if 2drop flush-swap ct-flush flush-pending gen-c! true exit then
+  2dup $+! str= if 2drop flush-swap ct-flush flush-pending gen-+! true exit then
+  2dup $cells str= if 2drop flush-swap ct-flush gen-cells true exit then
+  2dup $cell+ str= if 2drop flush-swap ct-flush gen-cell+ true exit then
   \ ---- I/O: flush, then normal ----
-  2dup $. str= if 2drop ct-flush flush-pending gen-dot true exit then
-  2dup $cr str= if 2drop ct-flush gen-cr true exit then
-  2dup $emit str= if 2drop ct-flush flush-pending gen-emit true exit then
-  2dup $type str= if 2drop ct-flush flush-pending gen-type true exit then
+  2dup $. str= if 2drop flush-swap ct-flush flush-pending gen-dot true exit then
+  2dup $cr str= if 2drop flush-swap ct-flush gen-cr true exit then
+  2dup $emit str= if 2drop flush-swap ct-flush flush-pending gen-emit true exit then
+  2dup $type str= if 2drop flush-swap ct-flush flush-pending gen-type true exit then
+  2dup $space str= if 2drop flush-swap ct-flush gen-space true exit then
+  \ ---- Memory operations ----
+  2dup $move str= if 2drop flush-swap ct-flush flush-pending gen-move true exit then
+  2dup $fill str= if 2drop flush-swap ct-flush flush-pending gen-fill true exit then
+  \ ---- Pictured Numeric Output ----
+  2dup $base str= if 2drop flush-swap ct-flush gen-base true exit then
+  2dup $<# str= if 2drop flush-swap ct-flush gen-<# true exit then
+  2dup $hold str= if 2drop flush-swap ct-flush flush-pending gen-hold true exit then
+  2dup $sign str= if 2drop flush-swap ct-flush flush-pending gen-sign true exit then
+  2dup $# str= if 2drop flush-swap ct-flush flush-pending gen-# true exit then
+  2dup $#s str= if 2drop flush-swap ct-flush flush-pending gen-#s true exit then
+  2dup $#> str= if 2drop flush-swap ct-flush flush-pending gen-#> true exit then
   \ ---- Control flow: flush, then normal ----
-  2dup $if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
-  2dup $<if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
-  2dup $>if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen->if cf-push true exit then
-  2dup $=if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-=if cf-push true exit then
-  2dup $0<if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-0<if cf-push true exit then
-  2dup $0=if str= if 2drop ct-flush flush-pending stack-depth @ cf-push gen-0=if cf-push true exit then
-  2dup $else str= if 2drop ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
-  2dup $then str= if 2drop ct-flush cf-pop gen-then cf-pop stack-depth ! true exit then
-  2dup $begin str= if 2drop ct-flush gen-begin cf-push true exit then
-  2dup $until str= if 2drop ct-flush flush-pending cf-pop gen-until true exit then
-  2dup $0=until str= if 2drop ct-flush flush-pending cf-pop gen-0=until true exit then
-  2dup $nzloop str= if 2drop ct-flush flush-pending cf-pop gen-nzloop true exit then
-  2dup $1-nzloop str= if 2drop ct-flush flush-pending cf-pop gen-1-nzloop true exit then
-  2dup $while str= if 2drop ct-flush flush-pending cf-pop gen-while cf-push cf-push true exit then
-  2dup $repeat str= if 2drop ct-flush cf-pop cf-pop gen-repeat true exit then
-  2dup $again str= if 2drop ct-flush cf-pop gen-again true exit then
-  2dup $do str= if 2drop ct-flush flush-pending gen-do true exit then
-  2dup $loop str= if 2drop ct-flush gen-loop true exit then
-  2dup $+loop str= if 2drop ct-flush flush-pending gen-+loop true exit then
-  2dup $i str= if 2drop ct-flush gen-i true exit then
-  2dup $j str= if 2drop ct-flush gen-j true exit then
-  2dup $recurse str= if 2drop ct-flush code-here tail-recurse ! gen-recurse true exit then
-  2dup $>r str= if 2drop ct-flush gen->r true exit then
-  2dup $r> str= if 2drop ct-flush gen-r> true exit then
-  2dup $r@ str= if 2drop ct-flush gen-r@ true exit then
-  2dup $2>r str= if 2drop ct-flush gen-2>r true exit then
-  2dup $2r> str= if 2drop ct-flush gen-2r> true exit then
-  2dup $2r@ str= if 2drop ct-flush gen-2r@ true exit then
-  2dup $exit str= if 2drop ct-flush gen-ret true exit then
-  2dup $here str= if 2drop data-here @ ct-push true exit then
+  2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
+  2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
+  2dup $>if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen->if cf-push true exit then
+  2dup $=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-=if cf-push true exit then
+  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0<if cf-push true exit then
+  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0=if cf-push true exit then
+  2dup $else str= if 2drop flush-swap ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
+  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop stack-depth ! true exit then
+  2dup $begin str= if 2drop flush-swap ct-flush gen-begin cf-push true exit then
+  \ OPTIMIZATION 8: save dup-pending/cmp-pending BEFORE flush-swap clears them.
+  \ Non-fused path emits gen-dup if dup was pending (e.g. dup until without 0>).
+  2dup $until str= if 2drop cmp-pending @ 0 cmp-pending ! dup-pending @ 0 dup-pending !
+    flush-swap ct-flush flush-pending
+    swap ?dup if nip cf-pop swap gen-until-fused
+    else if gen-dup then cf-pop gen-until then true exit then
+  2dup $0=until str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-0=until true exit then
+  2dup $nzloop str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-nzloop true exit then
+  2dup $1-nzloop str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-1-nzloop true exit then
+  \ OPTIMIZATION 8: same pattern as until. See comment above $until handler.
+  2dup $while str= if 2drop cmp-pending @ 0 cmp-pending ! dup-pending @ 0 dup-pending !
+    flush-swap ct-flush flush-pending
+    swap ?dup if nip cf-pop swap gen-while-fused cf-push cf-push
+    else if gen-dup then cf-pop gen-while cf-push cf-push then true exit then
+  2dup $repeat str= if 2drop flush-swap ct-flush cf-pop cf-pop gen-repeat true exit then
+  2dup $again str= if 2drop flush-swap ct-flush cf-pop gen-again true exit then
+  2dup $do str= if 2drop flush-swap
+    \ OPTIMIZATION 10: save known trip count and code position before ct-flush.
+    ct-depth @ 2 >= if
+      ct-stack ct-depth @ 2 - cells + @   \ limit (deeper)
+      ct-stack ct-depth @ 1 - cells + @   \ start (shallower)
+      - do-depth @ cells do-trip + !      \ trip = limit - start
+    else -1 do-depth @ cells do-trip + ! then
+    code-here do-depth @ cells do-origin + !    \ save rewind point
+    stack-depth @ do-depth @ cells do-sdepth + !  \ save stack depth
+    ct-flush flush-pending gen-do true exit then
+  2dup $loop str= if 2drop flush-swap ct-flush gen-loop true exit then
+  2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop true exit then
+  2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
+  2dup $j str= if 2drop flush-swap ct-flush gen-j true exit then
+  2dup $recurse str= if 2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
+  2dup $>r str= if 2drop flush-swap ct-flush gen->r true exit then
+  2dup $r> str= if 2drop flush-swap ct-flush gen-r> true exit then
+  2dup $r@ str= if 2drop flush-swap ct-flush gen-r@ true exit then
+  2dup $2>r str= if 2drop flush-swap ct-flush gen-2>r true exit then
+  2dup $2r> str= if 2drop flush-swap ct-flush gen-2r> true exit then
+  2dup $2r@ str= if 2drop flush-swap ct-flush gen-2r@ true exit then
+  2dup $exit str= if 2drop flush-swap ct-flush gen-ret true exit then
+  2dup $here str= if 2drop flush-swap data-here @ ct-push true exit then
+  2dup $[char] str= if 2drop flush-swap get-token dup 0> if c@ ct-push else 2drop then true exit then
   dup 2 = if over dup c@ [char] . = swap 1+ c@ [char] " = and if
-    2drop ct-flush gen-dotquote true exit
+    2drop flush-swap ct-flush gen-dotquote true exit
   then then
   dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] " = and if
-    2drop ct-flush gen-s" true exit
+    2drop flush-swap ct-flush gen-s" true exit
   then then
   2drop false ;
 
@@ -1625,6 +2040,8 @@ variable scan-io
     2dup $. str= if 1 scan-io ! then
     2dup $cr str= if 1 scan-io ! then
     2dup $emit str= if 1 scan-io ! then
+    2dup $space str= if 1 scan-io ! then
+    2dup $type str= if 1 scan-io ! then
     2drop
   again ;
 
@@ -1664,14 +2081,9 @@ variable scan-name-len
 
 : compile-token ( addr u -- )
   0 tail-recurse !
-  2dup compile-builtin if 2drop exit then
-  2dup parse-number if
-    nip nip
-    ct-push exit
-  then
-  ct-flush
+  \ User definitions override builtins (standard Forth semantics)
   2dup dict-find ?dup if
-    nip nip
+    nip nip flush-swap ct-flush
     \ DCE: skip void pure calls (IO bit=0, void bit not set)
     \ Disabled: can't distinguish variable stores from pure functions
     \ dup dict-flags @ ?dup if
@@ -1686,6 +2098,15 @@ variable scan-name-len
     then
     dict-addr @ gen-call exit
   then
+  \ No user definition — try builtins and numbers
+  2dup compile-builtin if 2drop exit then
+  2dup parse-number if
+    nip nip
+    dup-pending @ if gen-dup  0 dup-pending ! then
+    ct-push exit
+  then
+  \ Forward reference — not yet defined
+  flush-swap ct-flush
   2dup info-find ?dup if
     dup 24 + @ call-nargs !
     1 call-rets !
@@ -1743,22 +2164,24 @@ variable ret-count 1 ret-count !
     then
   again ;
 
+variable is-main  0 is-main !
 : start-def ( addr u -- )
   0 ct-depth !
+  2dup $main str= is-main !
   dict-add
   code-here current-word-addr !
   0 has-io !
   0 is-void !
   0 do-depth !
-  1 arg-count !
+  is-main @ if 0 else 1 then arg-count !
   1 ret-count !
   parse-stack-comment
-  arg-count @ 1 max stack-depth !
+  arg-count @ stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
 : end-def ( -- )
-  ct-flush
+  flush-swap ct-flush
   tail-recurse @ ?dup if
     code-pos !
     gen-tail-recurse
@@ -1859,12 +2282,18 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE data-here !
+  DATA-BASE 144 + data-here !
   gen-prologue
   compile-all
   patch-start
+  \ Reset compiler state for startup code
+  0 stack-depth !  0 ct-depth !
+  0 swap-pending !  0 dup-pending !  0 cmp-pending !
+  \ Initialize base variable to 10
+  $48 c, $c7 c, $04 c, $25 c, rt-base d, 10 d,  \ mov qword [rt-base], 10
   $main dict-find
   ?dup if
+    0 call-nargs !  0 call-rets !
     dict-addr @ gen-call
   then
   gen-cr
