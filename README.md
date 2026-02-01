@@ -1,19 +1,19 @@
-# Fifth
+# Sixth
 
 ```
-    ███████╗██╗███████╗████████╗██╗  ██╗
-    ██╔════╝██║██╔════╝╚══██╔══╝██║  ██║
-    █████╗  ██║█████╗     ██║   ███████║
-    ██╔══╝  ██║██╔══╝     ██║   ██╔══██║
-    ██║     ██║██║        ██║   ██║  ██║
-    ╚═╝     ╚═╝╚═╝        ╚═╝   ╚═╝  ╚═╝
+    ███████╗██╗██╗  ██╗████████╗██╗  ██╗
+    ██╔════╝██║╚██╗██╔╝╚══██╔══╝██║  ██║
+    ███████╗██║ ╚███╔╝    ██║   ███████║
+    ╚════██║██║ ██╔██╗    ██║   ██╔══██║
+    ███████║██║██╔╝ ██╗   ██║   ██║  ██║
+    ╚══════╝╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝
          A Forth for the Agentic Era
 ```
 
 > *"I think the industry is fundamentally unable to appreciate simplicity."*
 > — Chuck Moore, creator of Forth
 
-Fifth is a self-contained Forth ecosystem designed for AI-assisted development. One binary, zero dependencies, instant startup. The explicit stack model and small vocabulary make it uniquely suited for LLM code generation — where other languages struggle with implicit state and sprawling APIs, Forth's simplicity becomes an advantage.
+Sixth is a self-contained Forth ecosystem designed for AI-assisted development. Built on [Fifth](https://github.com/quivent/fifth), its predecessor. One binary, zero dependencies, instant startup. The explicit stack model and small vocabulary make it uniquely suited for LLM code generation — where other languages struggle with implicit state and sprawling APIs, Forth's simplicity becomes an advantage.
 
 Write tools that parse data, generate HTML, query databases — and optionally compile them to native code when you need speed.
 
@@ -24,40 +24,40 @@ Write tools that parse data, generate HTML, query databases — and optionally c
 ### Homebrew (macOS)
 
 ```bash
-brew tap quivent/fifth
-brew install fifth
+brew tap quivent/sixth
+brew install sixth
 ```
 
 ### From Source (30 seconds)
 
 ```bash
-git clone https://github.com/quivent/fifth.git
-cd fifth && cd engine && make && cd ..
-./fifth install.fs
+git clone https://github.com/quivent/sixth.git
+cd sixth && cd engine && make && cd ..
+./sixth install.fs
 ```
 
-Fifth installs itself to `/usr/local/bin`. Then just `fifth` from anywhere.
+Sixth installs itself to `/usr/local/bin`. Then just `sixth` from anywhere.
 
 <details>
 <summary>Alternative: Manual install</summary>
 
 ```bash
-git clone https://github.com/quivent/fifth.git
-cd fifth
+git clone https://github.com/quivent/sixth.git
+cd sixth
 cd engine && make && cd ..
-mkdir -p ~/.fifth/lib ~/.fifth/packages
-cp -r lib/* ~/.fifth/lib/
-sudo cp engine/fifth /usr/local/bin/
-fifth -e "2 3 + . cr"   # Should print: 5
+mkdir -p ~/.sixth/lib ~/.sixth/packages
+cp -r lib/* ~/.sixth/lib/
+sudo cp engine/sixth /usr/local/bin/
+sixth -e "2 3 + . cr"   # Should print: 5
 ```
 </details>
 
 ### What You Get
 
 ```
-/usr/local/bin/fifth         57 KB - works everywhere
+/usr/local/bin/sixth         57 KB - works everywhere
 
-~/.fifth/                    Your package directory
+~/.sixth/                    Your package directory
 ├── lib/                     Core libraries (str, html, sql, ui)
 └── packages/                Your installed packages
 ```
@@ -69,14 +69,14 @@ fifth -e "2 3 + . cr"   # Should print: 5
 ### Hello, World
 
 ```bash
-fifth -e ': hello ." Hello, World!" cr ; hello'
+sixth -e ': hello ." Hello, World!" cr ; hello'
 ```
 
 ### Interactive REPL
 
 ```bash
-fifth
-\ Welcome to Fifth
+sixth
+\ Welcome to Sixth
 2 3 + .          \ 5
 : square dup * ;
 5 square .       \ 25
@@ -86,7 +86,7 @@ bye
 ### Run a File
 
 ```bash
-fifth examples/project-dashboard.fs
+sixth examples/project-dashboard.fs
 ```
 
 ### Your First Program
@@ -94,10 +94,10 @@ fifth examples/project-dashboard.fs
 Create `hello.fs`:
 
 ```forth
-\ hello.fs - My first Fifth program
+\ hello.fs - My first Sixth program
 
 : greet ( -- )
-  ." Welcome to Fifth!" cr
+  ." Welcome to Sixth!" cr
   ." The stack has " depth . ." items." cr ;
 
 : countdown ( n -- )
@@ -116,25 +116,25 @@ bye
 Run it:
 
 ```bash
-fifth hello.fs
+sixth hello.fs
 ```
 
 ---
 
 ## Usage Examples
 
-> **[View the showcase →](https://quivent.github.io/fifth/showcase.html)** — 30+ examples generated entirely in Fifth, running in your browser.
+> **[View the showcase →](https://quivent.github.io/sixth/showcase.html)** — 30+ examples generated entirely in Sixth, running in your browser.
 
 ### Generate HTML Reports
 
 ```forth
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 use lib:core.fs
 use lib:html.fs
 
 s" /tmp/hello.html" w/o create-file throw html>file
 s" My Page" html-head html-body
-  s" Hello from Fifth!" h1.
+  s" Hello from Sixth!" h1.
   s" Generated with zero dependencies." p.
 html-end
 html-fid @ close-file throw
@@ -146,7 +146,7 @@ s" /tmp/hello.html" open-path
 ### Query SQLite Databases
 
 ```forth
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 use lib:core.fs
 
 \ Count users
@@ -168,7 +168,7 @@ sql-close
 ### Build a Dashboard
 
 ```forth
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 use lib:core.fs
 use lib:ui.fs
 
@@ -189,7 +189,7 @@ html-fid @ close-file throw
 
 ## Demo Databases
 
-Fifth includes ready-to-use SQLite databases in `data/` for immediate experimentation:
+Sixth includes ready-to-use SQLite databases in `data/` for immediate experimentation:
 
 ### projects.db — Project Topology
 
@@ -246,20 +246,20 @@ sqlite3 data/agents.db "SELECT avatar, name, role FROM agents ORDER BY priority 
 | 📝 | Documenter | Technical Writer |
 
 ```bash
-fifth examples/agent-dashboard.fs
+sixth examples/agent-dashboard.fs
 ```
 
 ---
 
 ## Package System
 
-Fifth uses `~/.fifth/` as its package home (configurable via `FIFTH_HOME`).
+Sixth uses `~/.sixth/` as its package home (configurable via `SIXTH_HOME`).
 
 ### Using Libraries
 
 ```forth
 \ Bootstrap the package system first
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 
 \ Load core libraries with lib: prefix
 use lib:str.fs           \ String buffers
@@ -276,20 +276,20 @@ use lib:core.fs
 
 ```forth
 \ Load a package with pkg: prefix
-use pkg:my-package       \ Loads ~/.fifth/packages/my-package/package.fs
+use pkg:my-package       \ Loads ~/.sixth/packages/my-package/package.fs
 ```
 
 ### Creating a Package
 
 ```bash
 # Create package directory
-mkdir -p ~/.fifth/packages/my-tools
+mkdir -p ~/.sixth/packages/my-tools
 
 # Create the main entry point
-cat > ~/.fifth/packages/my-tools/package.fs << 'EOF'
+cat > ~/.sixth/packages/my-tools/package.fs << 'EOF'
 \ my-tools/package.fs - My custom tools
 
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 use lib:str.fs
 
 : greet-user ( addr u -- )
@@ -304,7 +304,7 @@ EOF
 Now use it:
 
 ```forth
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 use pkg:my-tools
 
 s" Alice" greet-user    \ Hello, Alice!
@@ -314,7 +314,7 @@ timestamp               \ Generated: 2024-01-28 15:30:00
 ### Package Structure
 
 ```
-~/.fifth/packages/my-package/
+~/.sixth/packages/my-package/
 ├── package.fs           Entry point (required)
 ├── utils.fs             Additional modules
 ├── data/                Package data files
@@ -355,12 +355,14 @@ No syntax. No types. No objects. Just words operating on a stack.
   │     ├── SwiftForth    Commercial, Windows focus
   │     └── VFX Forth     Optimizing compiler
   │
-  └── 2024  Fifth         For the agentic era ← You are here
+  ├── 2024  Fifth         Practical Forth for AI-assisted development
+  │
+  └── 2025  Sixth         For the agentic era ← You are here
 ```
 
-### Fifth vs Gforth
+### Sixth vs Gforth
 
-| Aspect | Gforth | Fifth |
+| Aspect | Gforth | Sixth |
 |--------|--------|-------|
 | **Philosophy** | Standards compliance | Practical minimalism |
 | **Binary size** | ~2 MB | 57 KB |
@@ -370,7 +372,7 @@ No syntax. No types. No objects. Just words operating on a stack.
 | **Compilation** | Threaded code | Native via Cranelift |
 | **Focus** | General-purpose | AI-assisted development |
 
-Fifth isn't "better" than Gforth — it has different goals. Gforth is a complete ANS Forth implementation. Fifth is a practical toolkit optimized for code generation and rapid deployment.
+Sixth isn't "better" than Gforth — it has different goals. Gforth is a complete ANS Forth implementation. Sixth is a practical toolkit optimized for code generation and rapid deployment.
 
 ---
 
@@ -378,7 +380,7 @@ Fifth isn't "better" than Gforth — it has different goals. Gforth is a complet
 
 Most programming languages were designed for humans typing code. They optimize for expressiveness, flexibility, and familiar syntax. But when AI generates code, these "features" become liabilities:
 
-| Challenge for LLMs | Traditional Languages | Fifth/Forth |
+| Challenge for LLMs | Traditional Languages | Sixth/Forth |
 |-------------------|----------------------|-------------|
 | **Implicit state** | Variables scattered across scopes, closures capturing context | One explicit stack. All state visible. |
 | **Large API surface** | Thousands of methods, multiple ways to do everything | ~75 core words. One way to do each thing. |
@@ -403,7 +405,7 @@ An LLM can verify this composition. It cannot verify that a Python function with
 
 **Explicit state eliminates hallucination vectors.** When the only state is a stack of integers, there's nowhere for imagined variables or phantom objects to hide. The LLM either tracks the stack correctly or produces code that fails immediately — not code that works sometimes and corrupts data later.
 
-**Small vocabulary means fewer combinations to learn.** GPT-4 has seen millions of Python programs with millions of API combinations. It still hallucinates method names. Fifth has 75 words. An LLM can hold the entire language in context and generate valid code reliably.
+**Small vocabulary means fewer combinations to learn.** GPT-4 has seen millions of Python programs with millions of API combinations. It still hallucinates method names. Sixth has 75 words. An LLM can hold the entire language in context and generate valid code reliably.
 
 → *See [docs/agentic-coding.md](docs/agentic-coding.md) for the full analysis.*
 
@@ -417,18 +419,18 @@ Every scripting language opens a file the same way: spawn a subprocess.
 Python/Node/Ruby:  interpreter → fork() → exec() → /usr/bin/open → LaunchServices → App
 ```
 
-Fifth skips all of that. `open-path` calls macOS `LSOpenCFURLRef` directly from C — the same API that `/usr/bin/open` calls internally, minus the process overhead:
+Sixth skips all of that. `open-path` calls macOS `LSOpenCFURLRef` directly from C — the same API that `/usr/bin/open` calls internally, minus the process overhead:
 
 ```
-Fifth open-path:   C engine → LSOpenCFURLRef() → LaunchServices → App
+Sixth open-path:   C engine → LSOpenCFURLRef() → LaunchServices → App
 ```
 
 ### Measured on M-series Mac
 
 | Method | Time | Overhead |
 |--------|------|----------|
-| **Fifth `open-path`** | **48ms** | None — direct OS call |
-| Fifth `system("open")` | 63ms | fork + exec |
+| **Sixth `open-path`** | **48ms** | None — direct OS call |
+| Sixth `system("open")` | 63ms | fork + exec |
 | Python `subprocess` | 80ms | interpreter + fork + exec |
 | Node.js `execSync` | 102ms | V8 + libuv + fork + exec |
 
@@ -454,10 +456,10 @@ For CLI tools and scripts, startup time dominates. A tool that takes 50ms to sta
 
 | Language | Startup Time | Notes |
 |----------|-------------|-------|
-| **Fifth (interpreter)** | **<1ms** | Direct execution, no initialization |
+| **Sixth (interpreter)** | **<1ms** | Direct execution, no initialization |
 | Lua | 1-2ms | Lightweight interpreter |
 | Perl | 5-10ms | |
-| Fifth (compiled) | ~10ms | Native binary, minimal runtime |
+| Sixth (compiled) | ~10ms | Native binary, minimal runtime |
 | Python | 30-50ms | Interpreter + module imports |
 | Node.js | 30-40ms | V8 initialization |
 | Ruby | 50-80ms | |
@@ -471,9 +473,9 @@ Throughput on compute-bound tasks, relative to optimized C.
 |----------|--------|-------|
 | C | 100% | Baseline |
 | Rust | 95-105% | Sometimes faster due to optimizations |
-| **Fifth (Cranelift)** | **70-85%** | Native compilation, no GC |
+| **Sixth (Cranelift)** | **70-85%** | Native compilation, no GC |
 | LuaJIT | 30-80% | Tracing JIT, varies by workload |
-| **Fifth (interpreter)** | **5-15%** | Threaded code, no JIT |
+| **Sixth (interpreter)** | **5-15%** | Threaded code, no JIT |
 | JavaScript (V8) | 20-50% | JIT with warmup |
 | Python | 1-3% | Pure interpreter |
 | Ruby | 2-5% | |
@@ -484,10 +486,10 @@ Baseline memory for a minimal program.
 
 | Language | Memory | Notes |
 |----------|--------|-------|
-| **Fifth (interpreter)** | **1-2 MB** | No GC, static allocation |
+| **Sixth (interpreter)** | **1-2 MB** | No GC, static allocation |
 | Lua | 1-2 MB | |
 | C | 1-2 MB | Depends on allocations |
-| **Fifth (compiled)** | **1-2 MB** | Minimal runtime |
+| **Sixth (compiled)** | **1-2 MB** | Minimal runtime |
 | Perl | 5-10 MB | |
 | Python | 10-15 MB | Interpreter + builtins |
 | Ruby | 15-20 MB | |
@@ -500,9 +502,9 @@ What you ship.
 
 | Language | Binary/Runtime Size | Notes |
 |----------|-------------------|-------|
-| **Fifth (interpreter)** | **57 KB** | Complete interpreter |
+| **Sixth (interpreter)** | **57 KB** | Complete interpreter |
 | Lua | 250 KB | Interpreter |
-| **Fifth (compiled)** | **10-50 KB** | Depends on program |
+| **Sixth (compiled)** | **10-50 KB** | Depends on program |
 | C (static) | 10-100 KB | Depends on libc |
 | Go | 2-10 MB | Includes runtime |
 | Rust | 300 KB - 5 MB | Depends on dependencies |
@@ -515,7 +517,7 @@ What you ship.
 
 ### Simplicity
 
-| Metric | Fifth | Python | JavaScript | Rust |
+| Metric | Sixth | Python | JavaScript | Rust |
 |--------|-------|--------|------------|------|
 | Core words/keywords | 75 | 35 + 150 builtins | 50+ keywords | 50+ keywords |
 | Concepts to learn | Stack, dictionary, words | Objects, classes, async, decorators... | Prototypes, closures, promises... | Ownership, borrowing, lifetimes... |
@@ -544,7 +546,7 @@ What you ship.
 ### Size Breakdown
 
 ```
-Fifth Interpreter (engine/)
+Sixth Interpreter (engine/)
 ├── vm.c          2,100 lines    Virtual machine, dictionary
 ├── prims.c       1,800 lines    Primitive words
 ├── io.c            450 lines    File I/O, system
@@ -552,7 +554,7 @@ Fifth Interpreter (engine/)
 ├── boot/core.fs    400 lines    Forth bootstrap
 └── Total         4,900 lines    → 57 KB binary
 
-Fifth Libraries (~/.fifth/lib/)
+Sixth Libraries (~/.sixth/lib/)
 ├── str.fs          150 lines    String buffers
 ├── html.fs         340 lines    HTML generation
 ├── sql.fs          150 lines    SQLite interface
@@ -562,7 +564,7 @@ Fifth Libraries (~/.fifth/lib/)
 ├── core.fs          70 lines    Loader
 └── Total         1,240 lines
 
-Fifth Compiler (compiler/)
+Sixth Compiler (compiler/)
 ├── frontend/     3,500 lines    Lexer, parser, SSA
 ├── optimizer/    4,200 lines    5-pass optimization
 ├── backend/      5,800 lines    Cranelift, C codegen
@@ -580,7 +582,7 @@ Fifth Compiler (compiler/)
                     │
       ┌─────────────┼─────────────┐
       ▼             ▼             ▼
- ./fifth        ./fifth        ./fifth
+ ./sixth        ./sixth        ./sixth
 (default)       compile       --emit-c
       │             │             │
       ▼             ▼             ▼
@@ -601,10 +603,10 @@ Same source files work on all backends.
 
 ```bash
 # Interpreted (default)
-fifth program.fs
+sixth program.fs
 
 # Compiled to native
-fifth compile program.fs -o program
+sixth compile program.fs -o program
 ./program
 ```
 
@@ -613,14 +615,14 @@ fifth compile program.fs -o program
 ## Project Structure
 
 ```
-~/fifth/
-├── fifth                    # CLI wrapper
+~/sixth/
+├── sixth                    # CLI wrapper
 ├── engine/                  # C interpreter (57 KB binary)
 │   ├── vm.c                 # Virtual machine core
 │   ├── prims.c              # Primitive words (~75)
 │   └── io.c                 # File I/O, system calls
 ├── compiler/                # Rust compiler (Cranelift backend)
-├── lib/                     # Source libraries (copied to ~/.fifth/lib/)
+├── lib/                     # Source libraries (copied to ~/.sixth/lib/)
 ├── data/                    # Demo databases (ready to use!)
 │   ├── projects.db          # Project topology examples
 │   └── agents.db            # Functional agent examples
@@ -628,7 +630,7 @@ fifth compile program.fs -o program
 ├── brand/                   # Brand assets (logo, guide)
 └── docs/                    # Documentation
 
-~/.fifth/                    # Package system (FIFTH_HOME)
+~/.sixth/                    # Package system (SIXTH_HOME)
 ├── lib/                     # Core libraries
 │   ├── str.fs               # String buffers, parsing
 │   ├── html.fs              # HTML generation, escaping
@@ -649,7 +651,7 @@ fifth compile program.fs -o program
 ```bash
 cd engine
 make
-# Binary: engine/fifth (57 KB, zero dependencies)
+# Binary: engine/sixth (57 KB, zero dependencies)
 ```
 
 ### With Native Compiler
@@ -662,8 +664,8 @@ cd engine && make && cd ..
 cd compiler && cargo build --release --features cranelift && cd ..
 
 # Use unified CLI
-fifth examples/hello.fs           # interpret
-fifth compile examples/hello.fs   # compile
+sixth examples/hello.fs           # interpret
+sixth compile examples/hello.fs   # compile
 ```
 
 ---
@@ -683,7 +685,7 @@ fifth compile examples/hello.fs   # compile
 
 ## Contributing
 
-Fifth grows by solving real problems. If you build something useful, extract the reusable words and submit them.
+Sixth grows by solving real problems. If you build something useful, extract the reusable words and submit them.
 
 See [docs/contributing.md](docs/contributing.md).
 
@@ -706,4 +708,4 @@ MIT
                               — Richard Feynman
 ```
 
-*Fifth: Because sometimes less is more.*
+*Sixth: Because sometimes less is more.*

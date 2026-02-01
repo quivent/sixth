@@ -1,25 +1,25 @@
-# CLAUDE.md - Fifth Project Context
+# CLAUDE.md - Sixth Project Context
 
-## What Fifth Is
+## What Sixth Is
 
-Fifth is a practical Forth ecosystem with its own interpreter, compiler, and standard libraries. No external dependencies beyond standard Unix tools (sqlite3 for database features).
+Sixth is a practical Forth ecosystem with its own interpreter, compiler, and standard libraries. Built on Fifth, its predecessor. No external dependencies beyond standard Unix tools (sqlite3 for database features).
 
-**Name origin**: Forth -> Fifth (next generation). Bringing Forth into modern development.
+**Name origin**: Forth -> Fifth -> Sixth. Each generation advancing Forth for modern development.
 
 ## Project Structure
 
 ```
-~/fifth/
+~/sixth/
 ├── engine/               C interpreter (the runtime)
-│   ├── fifth.c           Main entry point
+│   ├── sixth.c           Main entry point
 │   ├── vm.c              Virtual machine core
 │   ├── prims.c           Primitive words
 │   └── io.c              I/O and file operations
-├── compiler/             Rust compiler (native code generation)
+├── compiler/             Native compiler (sixth.fs)
 ├── examples/             Example applications
-└── fifth                 CLI wrapper script
+└── sixth                 CLI wrapper script
 
-~/.fifth/                 Package system (FIFTH_HOME)
+~/.sixth/                 Package system (SIXTH_HOME)
 ├── lib/                  Core libraries
 │   ├── str.fs            String buffers, parsing
 │   ├── html.fs           HTML generation
@@ -96,34 +96,34 @@ core.fs     --> str.fs, html.fs, sql.fs, pkg.fs
 
 ```bash
 # Run examples
-./fifth examples/db-viewer.fs
-./fifth examples/project-dashboard.fs
+./sixth examples/db-viewer.fs
+./sixth examples/project-dashboard.fs
 
 # One-liner
-./fifth -e "2 3 + . cr"
+./sixth -e "2 3 + . cr"
 
 # Interactive REPL
-./fifth
+./sixth
 
 # Load core libraries interactively
-./fifth -e "require ~/.fifth/lib/pkg.fs use lib:core.fs"
+./sixth -e "require ~/.sixth/lib/pkg.fs use lib:core.fs"
 
 # Package commands
-./fifth pkg list
-./fifth pkg path
+./sixth pkg list
+./sixth pkg path
 ```
 
 ## Package System
 
 ```forth
 \ Bootstrap the package system
-require ~/.fifth/lib/pkg.fs
+require ~/.sixth/lib/pkg.fs
 
-\ Load libraries from ~/.fifth/lib/
+\ Load libraries from ~/.sixth/lib/
 use lib:core.fs
 use lib:str.fs
 
-\ Load packages from ~/.fifth/packages/
+\ Load packages from ~/.sixth/packages/
 use pkg:claude-tools
 ```
 
@@ -168,9 +168,9 @@ Results are pipe-delimited. `sql-field` extracts by 0-based index.
 
 ## Conventions
 
-- Core libraries go in `~/.fifth/lib/`
-- Packages go in `~/.fifth/packages/NAME/`
-- Every `.fs` file starts with a comment block: `\ fifth/path/file.fs - Description`
+- Core libraries go in `~/.sixth/lib/`
+- Packages go in `~/.sixth/packages/NAME/`
+- Every `.fs` file starts with a comment block: `\ sixth/path/file.fs - Description`
 - Use `require` not `include` (prevents double-loading)
 - CSS class names use kebab-case: `stat-card`, `grid-auto`, `bg-primary`
 - Word names follow Forth convention: `<tag>`, `</tag>`, `tag.` (dot = convenience with content)
