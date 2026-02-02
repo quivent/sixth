@@ -226,6 +226,12 @@ variable info-count  0 info-count !
 : dict-addr ( entry -- addr ) 24 + ;
 : dict-flags ( entry -- addr ) 28 + ;
 
+\ INLINING: DISABLED
+\ The compiler's dup-pending optimization breaks inlining:
+\ "dup *" compiles to imul rax,rbx assuming rbx=dup of rax.
+\ When inlined into a context with something else in rbx, wrong result.
+\ Would need to track which words use dup-pending and exclude them.
+
 32 constant FIXUP-MAX
 create fixup-buf FIXUP-MAX 28 * allot
 variable fixup-count  0 fixup-count !
@@ -2398,6 +2404,9 @@ variable scan-name-len
       drop arg-count @ call-nargs !
       1 call-rets !
     then
+    \ INLINE: DISABLED - dup-pending optimization makes inlining incorrect
+    \ "dup *" compiles to imul rax,rbx assuming rbx=copy of rax.
+    \ When inlined, rbx contains caller's NOS, not a dup of TOS.
     dict-addr @ gen-call exit
   then
   \ No user definition — try builtins and numbers
@@ -2489,7 +2498,9 @@ variable ret-count 1 ret-count !
   else
     gen-ret
   then
-  1
+  \ Store word size in flags bits 16-23 (max 255)
+  code-here current-word-addr @ - 255 min 16 lshift
+  1 or
   has-io @ 1 lshift or
   is-void @ 0= if 4 or then
   arg-count @ 3 lshift or

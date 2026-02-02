@@ -1,0 +1,45 @@
+ADVERSARIAL FORTH COMPILER TEST SUITE
+=====================================
+
+These tests are compiler-agnostic. They test standard Forth semantics.
+Any compliant Forth compiler must pass all tests.
+
+RUNNING
+-------
+From a Forth interpreter:
+  include run-all.fs
+
+Or run individual test files:
+  include 0001-stack-basic.fs
+
+TEST CATEGORIES
+---------------
+0001 - Basic stack operations (dup, drop, swap, over, rot, nip, tuck)
+0002 - Arithmetic edge cases (negative numbers, zero, overflow)
+0003 - Comparison operations (=, <>, <, >, 0<, 0=)
+0004 - Control flow (if/then/else, begin/until/while, do/loop)
+0005 - Return stack operations (>r, r>, r@, 2>r, 2r>)
+0006 - Memory operations (!, @, +!, c!, c@, here, ,)
+0007 - Logic and bitwise (and, or, xor, invert, lshift, rshift)
+0008 - Double-cell operations (s>d, d+, d-, 2dup, 2swap, 2over)
+0009 - Mixed-precision arithmetic (*/, um*, m*, etc.)
+0010 - Recursion (factorial, fibonacci, mutual recursion)
+0011 - String operations (s", compare, /string, move)
+0012 - Immediate words (literal, postpone, ['], state)
+0013 - CREATE DOES> (the heart of Forth extensibility)
+0014 - Exception handling (catch, throw, abort")
+0015 - Values (value, to, 2value)
+0016 - Deferred words (defer, is, action-of)
+0017 - Parsing words (parse-name, word, source)
+0018 - Number conversion (base, <#, #, #s, #>, hold, sign)
+0019 - Loop control (leave, unloop)
+0020 - Case statement (case, of, endof, endcase)
+
+PHILOSOPHY
+----------
+These tests exist because compilers lie.
+They claim compliance but fail on edge cases.
+Run these tests. Find the lies.
+
+-- Chuck Moore would say: "If it passes, it might be a Forth.
+   If it fails, it definitely is not."
