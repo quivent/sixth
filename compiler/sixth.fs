@@ -1779,6 +1779,51 @@ variable start-jmp
   $48 c, $b8 c, rt-word-buf q,                \ mov rax, rt-word-buf
   -1 stack-depth +! ;                         \ result is 1 cell
 
+: gen-accept ( -- )
+  \ ( addr u1 -- u2 ) read line from stdin into buffer
+  \ rax=max, rbx=addr. Result: rax=actual count
+  1 has-io !
+  stack-depth @ 3 >= if $51 c, then           \ push rcx if needed
+  $48 c, $89 c, $da c,                        \ mov rdx, rbx (max count to rdx)
+  $48 c, $89 c, $c6 c,                        \ mov rsi, rax (actually swap: rsi=addr)
+  \ Oops - rax=u1 (max), rbx=addr. Need: rsi=addr, rdx=max
+  \ Redo: rbx=addr→rsi, rax=max→rdx
+  $48 c, $89 c, $c2 c,                        \ mov rdx, rax (max)
+  $48 c, $89 c, $de c,                        \ mov rsi, rbx (addr)
+  $31 c, $c0 c,                               \ xor eax, eax (sys_read=0)
+  $31 c, $ff c,                               \ xor edi, edi (stdin=0)
+  $0f c, $05 c,                               \ syscall
+  \ rax = bytes read. Strip trailing newline if present.
+  $48 c, $85 c, $c0 c,                        \ test rax, rax
+  $7e c, 12 c,                                \ jle done (no bytes)
+  $48 c, $8d c, $7c c, $06 c, $ff c,          \ lea rdi, [rsi+rax-1]
+  $80 c, $3f c, 10 c,                         \ cmp byte [rdi], 10 (newline?)
+  $75 c, 3 c,                                 \ jne done
+  $48 c, $ff c, $c8 c,                        \ dec rax
+  \ done: rax = count (without newline)
+  stack-depth @ 3 >= if $59 c, then           \ pop rcx if needed
+  -1 stack-depth +! ;                         \ result is 1 cell (was 2)
+
+: gen-refill ( -- )
+  \ ( -- flag ) read line into SOURCE buffer, reset >IN
+  \ Returns true if line was read, false on EOF
+  1 has-io !
+  push-tos
+  \ Read into rt-source-buf
+  $48 c, $be c, rt-source-buf q,              \ mov rsi, rt-source-buf
+  $ba c, SOURCE-SIZE d,                       \ mov edx, SOURCE-SIZE
+  $31 c, $c0 c,                               \ xor eax, eax (sys_read=0)
+  $31 c, $ff c,                               \ xor edi, edi (stdin=0)
+  $0f c, $05 c,                               \ syscall
+  \ rax = bytes read. Store in rt-source-len.
+  $48 c, $89 c, $04 c, $25 c, rt-source-len d, \ mov [rt-source-len], rax
+  \ Reset >in to 0
+  $48 c, $c7 c, $04 c, $25 c, rt->in d, 0 d,  \ mov qword [rt->in], 0
+  \ Return true if rax > 0
+  $48 c, $85 c, $c0 c,                        \ test rax, rax
+  $0f c, $9f c, $c0 c,                        \ setg al
+  $48 c, $0f c, $b6 c, $c0 c, ;               \ movzx rax, al
+
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
@@ -1944,6 +1989,8 @@ s" source" s, 2constant $source
 s" >in" s, 2constant $>in
 s" parse" s, 2constant $parse
 s" word" s, 2constant $word
+s" accept" s, 2constant $accept
+s" refill" s, 2constant $refill
 
 \ ============================================================
 \ TOKENIZER
@@ -2280,6 +2327,8 @@ variable num-neg
   2dup $>in str= if 2drop flush-swap ct-flush gen->in true exit then
   2dup $parse str= if 2drop flush-swap ct-flush flush-pending gen-parse true exit then
   2dup $word str= if 2drop flush-swap ct-flush flush-pending gen-word true exit then
+  2dup $accept str= if 2drop flush-swap ct-flush flush-pending gen-accept true exit then
+  2dup $refill str= if 2drop flush-swap ct-flush gen-refill true exit then
   \ ---- Control flow: flush, then normal ----
   2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
   2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then

@@ -183,3 +183,43 @@ Results are pipe-delimited. `sql-field` extracts by 0-based index.
 - Don't assume `s"` strings persist after the word returns (they're transient)
 - Don't redefine standard Forth words (`emit-file`, `type`, etc.)
 - Don't create words with embedded whitespace (impossible in Forth)
+
+## NO BASH FOR TESTING
+
+**This is Forth. Use Forth.**
+
+NEVER use bash heredocs, pipes, or shell scripting to test Forth code. That's Unix brain damage.
+
+### Native Compiler Tests
+
+Test files live in `compiler/tests/`. Pattern:
+```forth
+\ expect: <expected output>
+\ Description
+: main <test code> ;
+```
+
+Add a test:
+1. Create `compiler/tests/NNNN-name.fs` with the pattern above
+2. Run: `./sixth compiler/tests/run.fs`
+
+Example:
+```forth
+\ expect: 5
+\ Test addition
+: main 2 3 + . cr ;
+```
+
+Manual single test:
+```bash
+./sixth compiler/sixth.fs compiler/tests/1000-refill-eof.fs /tmp/t && /tmp/t
+```
+
+### Interpreter Tests
+
+```bash
+./fifth test.fs
+./fifth -e "1 2 + . cr"
+```
+
+No heredocs. No pipes. No bash string manipulation. Write a `.fs` file or use `-e`.
