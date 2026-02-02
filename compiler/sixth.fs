@@ -104,7 +104,7 @@ create cf-stack 64 cells allot
 variable cf-sp  0 cf-sp !
 
 \ Data segment allocation (variables, create/allot)
-$40A000 constant DATA-BASE
+$800000 constant DATA-BASE    \ In separate data segment (was $40A000 in code)
 \ Reserved data segment layout:
 \   +0:   base variable (8 bytes, initialized to 10)
 \   +8:   pno-pos variable (8 bytes)
@@ -188,23 +188,19 @@ variable info-count  0 info-count !
 
 : elf-header ( -- )
   0 elf-pos !
-  $7f e, 69 e, 76 e, 70 e,
-  2 e, 1 e, 1 e, 0 e,
-  0 e8,
-  2 e2, $3e e2, 1 e4,
-  $400078 e8,
-  64 e8, 0 e8, 0 e4,
-  64 e2, 56 e2, 1 e2,
-  0 e2, 0 e2, 0 e2,
-  1 e4, 7 e4, 0 e8,
-  $400000 e8, $400000 e8,
-  120 code-pos @ + e8,
-  $100000 e8,  \ 1MB memory (was 64KB, caused stack to hit code)
-  $1000 e8, ;
+  $7f e, 69 e, 76 e, 70 e,  2 e, 1 e, 1 e, 0 e,  0 e8,
+  2 e2, $3e e2, 1 e4,  $4000B0 e8,  64 e8, 0 e8, 0 e4,
+  64 e2, 56 e2, 2 e2,  0 e2, 0 e2, 0 e2,
+  \ code RX
+  1 e4, 5 e4, 0 e8,  $400000 e8, $400000 e8,
+  176 code-pos @ + dup e8, e8,  $1000 e8,
+  \ data RW
+  1 e4, 6 e4, 0 e8,  $800000 e8, $800000 e8,
+  0 e8, $200000 e8,  $1000 e8, ;
 
 : write-elf ( addr u -- )
   w/o create-file throw >r
-  elf-buf 120 r@ write-file throw
+  elf-buf 176 r@ write-file throw
   code-buf code-pos @ r@ write-file throw
   r> close-file throw ;
 
@@ -1442,6 +1438,7 @@ variable current-word-addr  0 current-word-addr !
   current-word-addr @ code-here 4 + - d, ;
 
 variable tail-recurse  0 tail-recurse !
+variable is-recursive  0 is-recursive !
 
 \ ============================================================
 \ PROLOGUE / EPILOGUE
@@ -1450,8 +1447,8 @@ variable tail-recurse  0 tail-recurse !
 variable start-jmp
 
 : gen-prologue ( -- )
-  $49 c, $bf c, $400000 $80000 + q,   \ r15 = data stack (was $8000, hit code)
-  $48 c, $bd c, $400000 $F0000 + q,   \ rbp = return stack
+  $49 c, $bf c, $800000 $100000 + q,  \ r15 = data stack at 0x900000 (data segment)
+  $48 c, $bd c, $800000 $180000 + q,  \ rbp = return stack at 0x980000
   $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )
@@ -1806,6 +1803,7 @@ s" leave" s, 2constant $leave
 s" within" s, 2constant $within
 s" count" s, 2constant $count
 s" recurse" s, 2constant $recurse
+s" recursive" s, 2constant $recursive
 s" exit" s, 2constant $exit
 s" >r" s, 2constant $>r
 s" r>" s, 2constant $r>
@@ -2240,7 +2238,10 @@ variable num-neg
   2dup $leave str= if 2drop flush-swap ct-flush gen-leave true exit then
   2dup $within str= if 2drop flush-swap ct-flush flush-pending gen-within true exit then
   2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
-  2dup $recurse str= if 2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
+  2dup $recursive str= if 2drop 1 is-recursive ! true exit then
+  2dup $recurse str= if
+    is-recursive @ 0= if 2drop ." recurse requires recursive declaration" cr 1 throw then
+    2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
   2dup $>r str= if 2drop flush-swap ct-flush gen->r true exit then
   2dup $r> str= if 2drop flush-swap ct-flush gen-r> true exit then
   2dup $r@ str= if 2drop flush-swap ct-flush gen-r@ true exit then
@@ -2506,6 +2507,7 @@ variable ret-count 1 ret-count !
   arg-count @ 3 lshift or
   ret-count @ 7 lshift or
   dict-buf dict-count @ 1- 32 * + dict-flags !
+  0 is-recursive !
   0 state ! ;
 
 : compile-word ( addr u -- )
