@@ -1,4 +1,4 @@
 \ expect: 50
-constant STEP 5
+5 constant STEP
 variable total
 : main 0 total ! 10 0 do STEP total +! loop total @ . cr ;

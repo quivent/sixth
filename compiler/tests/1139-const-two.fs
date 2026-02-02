@@ -1,4 +1,4 @@
 \ expect: 15
-constant W 3
-constant H 5
+3 constant W
+5 constant H
 : main W H * . cr ;

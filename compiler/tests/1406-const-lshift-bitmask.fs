@@ -1,5 +1,5 @@
 \ expect: 15
-constant BITS 4
+4 constant BITS
 : main
   0
   BITS 0 do

@@ -1627,7 +1627,7 @@ variable start-jmp
     then then
   until
   code-here r> patch-rel32        \ patch jmp to skip over string data
-  swap $400078 + swap             \ ( runtime-addr len )
+  swap $4000B0 + swap             \ ( runtime-addr len )
   push-tos
   $48 c, $b8 c, swap q,          \ mov rax, addr
   push-tos

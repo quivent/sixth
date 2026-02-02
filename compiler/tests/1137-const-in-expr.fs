@@ -1,3 +1,3 @@
 \ expect: 30
-constant N 10
+10 constant N
 : main N 3 * . cr ;

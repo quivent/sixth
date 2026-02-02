@@ -1,3 +1,3 @@
 \ expect: 42
-constant N 42
+42 constant N
 : main N . cr ;

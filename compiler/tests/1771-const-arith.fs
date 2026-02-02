@@ -1,4 +1,4 @@
 \ expect: 13
-constant A 10
-constant B 3
+10 constant A
+3 constant B
 : main A B + . cr ;

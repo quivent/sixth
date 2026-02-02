@@ -1,3 +1,3 @@
 \ expect: 100
-constant SIZE 100
+100 constant SIZE
 : main SIZE . cr ;
