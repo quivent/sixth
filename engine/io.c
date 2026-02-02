@@ -1,4 +1,4 @@
-/* io.c - Fifth I/O Primitives
+/* io.c - Sixth I/O Primitives
  *
  * Console I/O, file operations, system(), include/require,
  * and comment words.
@@ -344,10 +344,11 @@ static void p_getenv(vm_t *vm) {
     const char *val = getenv(name);
     if (val) {
         size_t vlen = strlen(val);
-        /* Copy value to dictionary space */
+        /* Copy to scratch space above HERE (transient, like S" in interpret mode) */
         cell_t dest = vm->here;
-        memcpy(vm->mem + dest, val, vlen);
-        vm->here += vlen;
+        if (dest + (cell_t)vlen < MEM_SIZE) {
+            memcpy(vm->mem + dest, val, vlen);
+        }
         push(vm, dest);
         push(vm, (cell_t)vlen);
     } else {

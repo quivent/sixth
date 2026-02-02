@@ -1,0 +1,133 @@
+# bench-notes.txt - Regression-critical benchmark annotations
+# Format: test-name<TAB>note
+# Tests marked here are optimization-sensitive. If their tf/gcc-O2 ratio
+# degrades significantly, the corresponding optimization is broken.
+#
+# Categories:
+#   FOLD    = constant folding (Optimization 1)
+#   FUSE    = literal-op fusion (Optimization 2)
+#   FWD     = double-pass forward references (Optimization 3)
+#   DCE     = dead code elimination (Optimization 4)
+#   TCO     = tail-call optimization (Optimization 5)
+#   REG     = register-based stack (Optimization 6)
+#   REAL    = real-program benchmark, exercises multiple optimizations
+#   LOOP    = loop-heavy, sensitive to codegen quality
+#   CALL    = call convention, sensitive to register save/restore
+
+# --- Constant Folding (Opt 1) ---
+1000-fold-add	FOLD: compile-time add
+1001-fold-sub	FOLD: compile-time sub
+1002-fold-mul	FOLD: compile-time mul
+1003-fold-div	FOLD: compile-time div
+1004-fold-mod	FOLD: compile-time mod
+1005-fold-and	FOLD: compile-time and
+1006-fold-or	FOLD: compile-time or
+1007-fold-xor	FOLD: compile-time xor
+1008-fold-negate	FOLD: compile-time negate
+1009-fold-1plus	FOLD: compile-time 1+
+1010-fold-1minus	FOLD: compile-time 1-
+1011-fold-2star	FOLD: compile-time 2*
+1012-fold-2div	FOLD: compile-time 2/
+1013-fold-invert	FOLD: compile-time invert
+1014-fold-abs	FOLD: compile-time abs
+1015-fold-chain	FOLD+FUSE: chained ops must fully fold
+1022-fold-drop	FOLD: drop of folded constant
+1023-fold-mixed-stack	FOLD: fold with stack ops interleaved
+1024-fold-before-dup	FOLD: flush before dup
+1025-fold-before-swap	FOLD: flush before swap
+1026-fold-before-over	FOLD: flush before over
+1027-fold-hex-const	FOLD: hex literal folding
+1028-fold-negative	FOLD: negative literal folding
+1029-fold-zero	FOLD: zero literal folding
+1034-fold-arith-pattern	FOLD+FUSE: arith benchmark pattern (3*7+$FFFFFF and)
+1035-fold-in-loop	FOLD: fold inside begin/while/repeat
+1036-fold-in-if	FOLD: fold inside if/then
+1037-fold-in-do-loop	FOLD: fold inside do/loop
+1038-fold-before-call	FOLD: flush before call
+1039-fold-before-store	FOLD: flush before !
+1040-fold-before-emit	FOLD: flush before emit
+1041-fold-before-dot	FOLD: flush before .
+1042-fold-deep-chain	FOLD: long chain of folded ops
+1044-fold-2plus	FOLD: compile-time 2+
+1045-fold-2minus	FOLD: compile-time 2-
+1046-fold-enddef	FOLD: flush at end of definition
+1049-fold-no-runtime-leak	FOLD: folded values must not leak to runtime stack
+
+# --- Literal-Op Fusion (Opt 2) ---
+1016-fuse-add-imm	FUSE: add immediate
+1017-fuse-sub-imm	FUSE: sub immediate
+1018-fuse-mul-imm	FUSE: mul immediate
+1019-fuse-and-imm	FUSE: and immediate
+1020-fuse-or-imm	FUSE: or immediate
+1021-fuse-xor-imm	FUSE: xor immediate
+1043-fuse-mul-large	FUSE: large immediate mul
+1047-fuse-in-loop	FUSE+LOOP: fusion inside loop iterations
+
+# --- Forward References / Double Pass (Opt 3) ---
+1030-fwd-ref-simple	FWD: simple forward call
+1031-fwd-ref-chain	FWD: chain of forward calls
+1032-fwd-ref-mutual	FWD: mutual recursion
+1033-fwd-ref-nargs	FWD: correct nargs for forward ref
+1048-fwd-ref-void	FWD: void forward reference
+
+# --- Dead Code Elimination (Opt 4) ---
+428-dead-drop	DCE: dead value dropped
+429-dead-nip	DCE: dead value nipped
+
+# --- Tail-Call Optimization (Opt 5) ---
+516-recurse-tail	TCO: tail-position recurse becomes jmp
+38-recurse	TCO: basic recursion
+235-recurse-fact	TCO: factorial recursion
+236-recurse-fib	TCO: fibonacci recursion
+500-recurse-fact5	TCO: factorial(5)
+501-recurse-fact10	TCO: factorial(10)
+502-recurse-fib10	TCO: fib(10)
+503-recurse-fib15	TCO: fib(15)
+507-recurse-deep20	TCO: deep recursion 20
+508-recurse-deep50	TCO: deep recursion 50
+509-recurse-deep100	TCO: deep recursion 100
+522-recurse-gcd	TCO: GCD recursion
+524-recurse-power	TCO: power recursion
+
+# --- Loop Performance ---
+14-begin-until	LOOP: basic until loop
+15-begin-while	LOOP: basic while loop
+207-until-arith	LOOP: arith in until
+217-while-arith	LOOP: arith in while
+264-mul-in-loop	LOOP: mul inside loop
+310-loop-accum-add	LOOP: accumulator add in loop
+311-loop-accum-mul	LOOP: accumulator mul in loop
+314-nested-loop-inner	LOOP: nested loop performance
+380-loop-product	LOOP: product accumulation
+543-div-in-loop	LOOP: div in loop
+807-do-loop-sum-10	LOOP: do-loop sum
+830-doloop-sum-1to100	LOOP: sum 1..100 in do-loop
+835-doloop-nested-sum	LOOP: nested do-loop sum
+849-doloop-large-range	LOOP: large range do-loop
+852-doloop-nested-product	LOOP: nested product
+
+# --- Call Convention ---
+16-call	CALL: basic word call
+17-call-chain	CALL: chained calls
+381-nested-call-arith	CALL: nested calls with arith
+714-helper-in-loop	CALL: helper word inside loop
+735-helper-in-do-loop	CALL: helper in do-loop
+
+# --- Real Program Benchmarks ---
+99-chain-arith	REAL: chained arithmetic expression
+399-stress-arith	REAL: arithmetic stress test
+1000-palindrome	REAL: palindrome checker (loops, mod, compare)
+1001-towers	REAL: powers of 2 (do-loop, mul)
+1002-prime-sieve	REAL: prime sieve (mod, do-loop, call, if)
+1003-collatz-length	REAL: collatz sequence (loop, if, mul, div)
+1004-digital-root	REAL: digital root (nested loops, mod)
+1005-sumdigits	REAL: sum of digits (loop, mod)
+1006-popcount	REAL: popcount (loop, mod, bitwise)
+1007-isqrt	REAL: integer sqrt (loop, mul, compare)
+1008-gcd-lcm	REAL: GCD/LCM (recursion, mod)
+1009-modpow	REAL: modular exponentiation (do-loop, mul, mod)
+1010-perfect-num	REAL: perfect number check (do-loop, mod, call)
+1011-harmonic-int	REAL: harmonic series (do-loop, div)
+1012-bitrev	REAL: bit reversal (loop, bitwise)
+1013-pascals-row	REAL: Pascal's triangle row (do-loop, mul, div)
+1014-matrix-trace	REAL: matrix trace (do-loop, mul, add)

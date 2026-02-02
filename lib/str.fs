@@ -1,4 +1,4 @@
-\ fifth/lib/str.fs - String Utilities
+\ sixth/lib/str.fs - String Utilities
 \ Buffer-based string building without dynamic allocation
 
 \ ============================================================
@@ -89,8 +89,8 @@ create line-buf line-max allot
 \ ============================================================
 
 : n>str ( n -- addr u )
-  \ Convert number to string
-  0 <# #s #> ;
+  \ Convert number to string (single-cell PNO)
+  dup 0< if negate <# #s [char] - hold #> else <# #s #> then ;
 
 \ ============================================================
 \ String Comparison

@@ -1,4 +1,4 @@
-/* vm.c - Fifth Virtual Machine
+/* vm.c - Sixth Virtual Machine
  *
  * VM lifecycle, inner/outer interpreter, dictionary operations.
  * This is the heart of the engine.
@@ -17,10 +17,6 @@ void docol(vm_t *vm) {
 }
 
 void dovar(vm_t *vm) {
-    push(vm, vm->dict[vm->w].param);
-}
-
-void docon(vm_t *vm) {
     push(vm, vm->dict[vm->w].param);
 }
 
@@ -89,7 +85,7 @@ int vm_add_prim(vm_t *vm, const char *name, prim_fn fn, bool immediate) {
 
 /* Add a constant */
 void vm_add_constant(vm_t *vm, const char *name, cell_t value) {
-    int idx = vm_add_prim(vm, name, docon, false);
+    int idx = vm_add_prim(vm, name, dovar, false);
     vm->dict[idx].param = value;
 }
 
@@ -343,5 +339,7 @@ void vm_destroy(vm_t *vm) {
     for (int i = 0; i < vm->loaded_count; i++) {
         free(vm->loaded_files[i]);
     }
+    /* Free thread state */
+    free(vm->thread_slots);
     free(vm);
 }

@@ -1,10 +1,10 @@
-/* main.c - Fifth Engine Entry Point
+/* main.c - Sixth Engine Entry Point
  *
  * Usage:
- *   fifth                      Interactive REPL
- *   fifth file.fs              Load and execute file
- *   fifth file.fs -e "code"    Load file, then execute code
- *   fifth -e "code"            Execute code
+ *   sixth                      Interactive REPL
+ *   sixth file.fs              Load and execute file
+ *   sixth file.fs -e "code"    Load file, then execute code
+ *   sixth -e "code"            Execute code
  */
 
 #include "fifth.h"
@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
             /* Stop processing files, remaining args available via argc/argv */
             break;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Fifth - A minimal Forth engine\n");
+            printf("Sixth - A minimal Forth engine\n");
             printf("Usage: fifth [file.fs ...] [-e \"code\"]\n");
             printf("\n");
             printf("  file.fs    Load and execute Forth source file(s)\n");
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
 
     /* Interactive REPL if no files were loaded */
     if (interactive && vm->running) {
-        printf("Fifth Engine v0.1.0\n");
+        printf("Sixth Engine v0.1.0\n");
         printf("Type 'bye' to exit.\n");
         vm_repl(vm);
     }

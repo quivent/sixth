@@ -1,4 +1,4 @@
-/* prims.c - Fifth Primitives
+/* prims.c - Sixth Primitives
  *
  * All C-level primitives: stack, arithmetic, memory, comparison,
  * logic, compiler words, control flow, strings, and numeric output.
@@ -877,8 +877,9 @@ static void p_argv(vm_t *vm) {
     if (n >= 0 && n < vm->argc) {
         char *arg = vm->argv[n];
         size_t len = strlen(arg);
-        /* Copy into reserved area at start of vm->mem (bytes 8-263) */
-        cell_t addr = 8;
+        /* Copy into reserved area at start of vm->mem (bytes 16-271)
+         * Bytes 0-7: STATE, bytes 8-15: BASE — do not touch */
+        cell_t addr = 16;
         if (len > 255) len = 255;
         memcpy(vm->mem + addr, arg, len);
         push(vm, addr);

@@ -89,6 +89,13 @@ fifth-home-init
   path$ ;
 
 \ ============================================================
+\ File Existence Check (self-contained, no core.fs dependency)
+\ ============================================================
+
+: file-exists? ( addr u -- flag )
+  r/o open-file if drop false else close-file drop true then ;
+
+\ ============================================================
 \ Package Loading
 \ ============================================================
 
@@ -124,8 +131,8 @@ fifth-home-init
   2dup s" pkg:" has-prefix? if
     4 strip-prefix use-pkg exit
   then
-  \ No prefix - use standard require
-  required ;
+  \ No prefix - use included (stack-based file loading)
+  included ;
 
 \ ============================================================
 \ Package Info

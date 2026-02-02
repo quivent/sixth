@@ -9,7 +9,7 @@
  *
  * Threading: indirect via C function pointers. Each dictionary entry
  * has a code field (prim_fn). For colon definitions, code = docol.
- * For variables, code = dovar. For constants, code = docon.
+ * For variables and constants, code = dovar.
  */
 
 #ifndef FIFTH_H
@@ -52,7 +52,7 @@ typedef struct {
     int          link;               /* Index of previous entry (-1 = end) */
     uint8_t      flags;              /* F_IMMEDIATE | F_HIDDEN | name length */
     char         name[NAME_MAX_LEN + 1];
-    prim_fn      code;               /* Handler: primitive, docol, dovar, docon, dodoes */
+    prim_fn      code;               /* Handler: primitive, docol, dovar, dodoes */
     cell_t       param;              /* Body: byte offset in mem[] or constant value */
     cell_t       does;               /* DOES> IP (byte offset), -1 if unused */
 } dict_entry_t;
@@ -127,6 +127,9 @@ struct vm {
     /* Command line arguments */
     int          argc;
     char       **argv;
+
+    /* Thread state (opaque, managed by spawn.c) */
+    void        *thread_slots;
 };
 
 /* === Inline Stack Operations === */
@@ -195,7 +198,6 @@ void  vm_add_variable(vm_t *vm, const char *name, cell_t initial);
 /* Word handlers */
 void  docol(vm_t *vm);
 void  dovar(vm_t *vm);
-void  docon(vm_t *vm);
 void  dodoes(vm_t *vm);
 
 /* Interpreter internals (used by prims.c, io.c) */

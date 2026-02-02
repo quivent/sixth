@@ -1,7 +1,8 @@
-/* spawn.c - Native concurrency for Fifth
+/* spawn.c - Native concurrency for Sixth
  *
  * Adds spawn/wait primitives using pthreads.
- * Each spawned word runs in its own thread with its own stack.
+ * Each spawned word runs in its own thread with its own VM.
+ * Thread state is per-VM (no global mutable state).
  */
 
 #include "fifth.h"
@@ -19,9 +20,22 @@ typedef struct {
     cell_t result;      /* TOS after execution */
 } thread_slot_t;
 
-static thread_slot_t threads[MAX_THREADS];
-static pthread_mutex_t thread_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int next_thread_id = 0;
+typedef struct {
+    thread_slot_t slots[MAX_THREADS];
+    pthread_mutex_t mutex;
+    int next_id;
+} thread_state_t;
+
+/* Get per-VM thread state, lazily allocate */
+static thread_state_t *get_state(vm_t *vm) {
+    if (!vm->thread_slots) {
+        thread_state_t *ts = calloc(1, sizeof(thread_state_t));
+        pthread_mutex_init(&ts->mutex, NULL);
+        ts->next_id = 0;
+        vm->thread_slots = ts;
+    }
+    return (thread_state_t *)vm->thread_slots;
+}
 
 /* Thread entry point */
 static void *thread_runner(void *arg) {
@@ -74,114 +88,107 @@ static vm_t *vm_clone(vm_t *parent) {
     child->xt_ploop = parent->xt_ploop;
     child->xt_does = parent->xt_does;
 
+    /* Child gets its own thread state (NULL = lazy init) */
+    child->thread_slots = NULL;
+
     return child;
 }
 
-/* SPAWN ( xt -- thread-id )
- * Execute xt in a new thread, return thread ID
- */
+/* SPAWN ( xt -- thread-id ) */
 static void p_spawn(vm_t *vm) {
     int xt = (int)pop(vm);
+    thread_state_t *ts = get_state(vm);
 
-    pthread_mutex_lock(&thread_mutex);
+    pthread_mutex_lock(&ts->mutex);
 
     /* Find free slot */
     int id = -1;
     for (int i = 0; i < MAX_THREADS; i++) {
-        int idx = (next_thread_id + i) % MAX_THREADS;
-        if (!threads[idx].active) {
+        int idx = (ts->next_id + i) % MAX_THREADS;
+        if (!ts->slots[idx].active) {
             id = idx;
-            next_thread_id = (idx + 1) % MAX_THREADS;
+            ts->next_id = (idx + 1) % MAX_THREADS;
             break;
         }
     }
 
     if (id < 0) {
-        pthread_mutex_unlock(&thread_mutex);
+        pthread_mutex_unlock(&ts->mutex);
         fprintf(stderr, "SPAWN: No free thread slots\n");
         push(vm, -1);
         return;
     }
 
     /* Set up thread */
-    threads[id].vm = vm_clone(vm);
-    threads[id].xt = xt;
-    threads[id].active = true;
-    threads[id].done = false;
-    threads[id].result = 0;
-
-    /* Copy arguments from parent stack to child */
-    /* (For now, child starts with empty stack) */
+    ts->slots[id].vm = vm_clone(vm);
+    ts->slots[id].xt = xt;
+    ts->slots[id].active = true;
+    ts->slots[id].done = false;
+    ts->slots[id].result = 0;
 
     /* Create thread */
-    if (pthread_create(&threads[id].thread, NULL, thread_runner, &threads[id]) != 0) {
-        free(threads[id].vm);
-        threads[id].active = false;
-        pthread_mutex_unlock(&thread_mutex);
+    if (pthread_create(&ts->slots[id].thread, NULL, thread_runner, &ts->slots[id]) != 0) {
+        free(ts->slots[id].vm);
+        ts->slots[id].active = false;
+        pthread_mutex_unlock(&ts->mutex);
         fprintf(stderr, "SPAWN: pthread_create failed\n");
         push(vm, -1);
         return;
     }
 
-    pthread_mutex_unlock(&thread_mutex);
+    pthread_mutex_unlock(&ts->mutex);
     push(vm, id);
 }
 
-/* WAIT ( thread-id -- result )
- * Wait for thread to complete, return its result
- */
+/* WAIT ( thread-id -- result ) */
 static void p_wait(vm_t *vm) {
     int id = (int)pop(vm);
+    thread_state_t *ts = get_state(vm);
 
-    if (id < 0 || id >= MAX_THREADS || !threads[id].active) {
+    if (id < 0 || id >= MAX_THREADS || !ts->slots[id].active) {
         fprintf(stderr, "WAIT: Invalid thread ID %d\n", id);
         push(vm, 0);
         return;
     }
 
-    pthread_join(threads[id].thread, NULL);
+    pthread_join(ts->slots[id].thread, NULL);
 
-    cell_t result = threads[id].result;
+    cell_t result = ts->slots[id].result;
 
     /* Cleanup */
-    free(threads[id].vm);
-    threads[id].active = false;
+    free(ts->slots[id].vm);
+    ts->slots[id].active = false;
 
     push(vm, result);
 }
 
-/* WAIT-ALL ( -- )
- * Wait for all spawned threads
- */
+/* WAIT-ALL ( -- ) */
 static void p_wait_all(vm_t *vm) {
-    (void)vm;
+    thread_state_t *ts = get_state(vm);
 
     for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].active) {
-            pthread_join(threads[i].thread, NULL);
-            free(threads[i].vm);
-            threads[i].active = false;
+        if (ts->slots[i].active) {
+            pthread_join(ts->slots[i].thread, NULL);
+            free(ts->slots[i].vm);
+            ts->slots[i].active = false;
         }
     }
 }
 
-/* THREAD-DONE? ( thread-id -- flag )
- * Check if thread is done without blocking
- */
+/* THREAD-DONE? ( thread-id -- flag ) */
 static void p_thread_done(vm_t *vm) {
     int id = (int)pop(vm);
+    thread_state_t *ts = get_state(vm);
 
-    if (id < 0 || id >= MAX_THREADS || !threads[id].active) {
+    if (id < 0 || id >= MAX_THREADS || !ts->slots[id].active) {
         push(vm, -1);  /* Invalid = done */
         return;
     }
 
-    push(vm, threads[id].done ? -1 : 0);
+    push(vm, ts->slots[id].done ? -1 : 0);
 }
 
-/* NPROC ( -- n )
- * Return number of available processors
- */
+/* NPROC ( -- n ) */
 static void p_nproc(vm_t *vm) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     push(vm, n > 0 ? n : 1);

@@ -1,5 +1,5 @@
-\ run.fs - Fifth native compiler test runner (strict output comparison)
-\ Usage: fifth compiler/tests/run.fs
+\ run.fs - Sixth native compiler test runner (strict output comparison)
+\ Usage: sixth compiler/tests/run.fs
 
 require lib/str.fs
 
@@ -196,8 +196,8 @@ variable list-len
 
 \ Main
 : run-all ( -- )
-  s" ls compiler/tests/[0-9]*.fs > /tmp/fifth-test-list.txt 2>/dev/null" system
-  s" /tmp/fifth-test-list.txt" slurp-file
+  s" ls compiler/tests/[0-9]*.fs > /tmp/sixth-test-list.txt 2>/dev/null" system
+  s" /tmp/sixth-test-list.txt" slurp-file
   dup LIST-MAX < 0= if
     2drop ." Test list too large for buffer" cr exit
   then

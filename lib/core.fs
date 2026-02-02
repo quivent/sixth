@@ -32,20 +32,13 @@ require ~/fifth/lib/sql.fs
 \ Shell Utilities
 \ ============================================================
 
-: $system ( addr u -- )
-  \ Execute shell command from string
-  system ;
-
 : open-file-cmd ( addr u -- )
-  \ Open file with system default app (macOS)
-  str-reset
-  s" open " str+
-  str+
-  str$ system ;
+  \ Open file/URL with system default app (cross-platform)
+  open-path ;
 
 : open-url ( addr u -- )
   \ Open URL in browser
-  open-file-cmd ;
+  open-path ;
 
 \ ============================================================
 \ Debug Utilities
