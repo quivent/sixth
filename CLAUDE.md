@@ -223,3 +223,57 @@ Manual single test:
 ```
 
 No heredocs. No pipes. No bash string manipulation. Write a `.fs` file or use `-e`.
+
+## Test Policy
+
+**Hayes tests (`compiler/tests/hayes/`) cover standard Forth.** Do not duplicate.
+
+Hayes tests thousands of edge cases for: `+`, `-`, `*`, `/`, `DO`, `LOOP`, `IF`, `ELSE`, `RECURSE`, `>R`, `R>`, and every other ANS Forth word. If it's standard Forth behavior, Hayes already tests it.
+
+**Write tests ONLY for:**
+
+1. **Compiler optimizations** - Constant folding, instruction fusing, peephole patterns
+2. **Codegen bugs** - Wrong assembly output, register allocation issues, not Forth semantics
+3. **Words unique to Sixth** - Anything not in ANS Forth
+4. **Regression tests** - Specific bug fixes with a ticket/commit reference
+
+**Test file locations:**
+
+| Range | Purpose |
+|-------|---------|
+| `01-99` | Primitive codegen verification |
+| `100-999` | Combined operations, control flow codegen |
+| `1000-1049` | Compiler optimizations (folding, fusing, fwd-refs) |
+| `1000+` (named) | Integration tests (algorithms exercising whole compiler) |
+
+**Before writing a test, ask:** Does Hayes already cover this? If yes, do not write the test.
+
+## TEST ENFORCEMENT - MANDATORY
+
+**YOU MUST USE `new-test.sh` TO CREATE TESTS. NO EXCEPTIONS.**
+
+```bash
+./compiler/tests/new-test.sh <number> <name> <category> <reason>
+```
+
+Example:
+```bash
+./compiler/tests/new-test.sh 1050 fold-lshift fold "Verify left-shift folding eliminates runtime op"
+```
+
+**Direct file creation is FORBIDDEN.** The script:
+1. Requires a valid category (codegen/optimization/fold/fuse/fwd-ref/regression/sixth-word/integration)
+2. Requires a reason explaining WHY this test exists
+3. Rejects reasons that smell like standard Forth testing
+4. Creates the file with required headers
+
+**Tests without proper headers will be deleted.**
+
+Every test file MUST have:
+```forth
+\ expect: <output>
+\ category: <valid-category>
+\ reason: <why this test exists, what compiler behavior it verifies>
+```
+
+**If you cannot articulate why Hayes doesn't cover this, you should not write the test.**

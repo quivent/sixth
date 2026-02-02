@@ -132,8 +132,9 @@ DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
 40 constant RT-DICT-ENTRY-SIZE
 256 constant RT-DICT-MAX
 DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
+DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
 
-variable data-here  DATA-BASE 14576 + data-here !
+variable data-here  DATA-BASE 14584 + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -1472,6 +1473,7 @@ variable start-jmp
   $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )
+  ." PATCH-START: target=" code-here . ." from=" start-jmp @ . cr
   code-here start-jmp @ patch-rel32 ;
 
 : gen-epilogue ( -- )
@@ -1891,7 +1893,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   \ Load source state
   $48 c, $8b c, $34 c, $25 c, rt->in d,       \ mov rsi, [rt->in]
   $48 c, $8b c, $3c c, $25 c, rt-source-len d, \ mov rdi, [rt-source-len]
-  $49 c, $b8 c, rt-source-buf q,              \ mov r8, rt-source-buf
+  $4c c, $8b c, $04 c, $25 c, rt-source-addr d, \ mov r8, [rt-source-addr]
 
   \ Skip leading spaces: S: ()
   code-here                                   \ S: (skip_loop)
@@ -1935,44 +1937,51 @@ variable rt-parse-addr  0 rt-parse-addr !
   $c3 c,                                      \ ret
   drop ;                                      \ clean up scan_loop
 
-: gen-interpret ( -- )  \ ( -- )
-  \ Runtime INTERPRET loop: parse words, find in dictionary, execute
-  \ Calls rt-parse and rt-find - total ~50 bytes, all rel8 jumps work
-
-  code-here >r                            \ R: ( loop )
-
-  \ Call parse-word function
+: gen-interpret-body ( -- )
+  \ INTERPRET loop - parse words, find them, execute them
+  code-here >r                                \ R: ( loop )
   $48 c, $b8 c, rt-parse-addr @ q,            \ mov rax, rt-parse-addr
-  $ff c, $d0 c,                               \ call rax
-
-  \ Check if empty (len in rax)
+  $ff c, $d0 c,                               \ call rax  -> rbx=addr, rax=len
   $48 c, $85 c, $c0 c,                        \ test rax, rax
-  $74 c, >mark                                \ jz done S: ( done )
-
-  \ Call find function (addr in rbx, len in rax)
+  $74 c, >mark                                \ jz done
   $48 c, $b8 c, rt-find-addr @ q,             \ mov rax, rt-find-addr
-  $ff c, $d0 c,                               \ call rax
-
-  \ Check if found (xt in rbx)
+  $ff c, $d0 c,                               \ call rax  -> rbx=xt, rax=flag (or 0,0)
   $48 c, $85 c, $db c,                        \ test rbx, rbx
-  $74 c, >mark                                \ jz not_found S: ( done nf )
-
-  \ Execute (xt in rbx -> rax, then call)
-  $48 c, $89 c, $d8 c,                        \ mov rax, rbx
-  $ff c, $d0 c,                               \ call rax
-
-  \ Jump back to loop start
+  $74 c, >mark                                \ jz not_found
+  $ff c, $d3 c,                               \ call rbx (execute found word)
   $eb c, r@ code-here - 1- c,                 \ jmp loop
-
-  \ not_found: skip unknown words
-  >resolve                                    \ S: ( done )
+  >resolve                                    \ not_found:
   $eb c, r@ code-here - 1- c,                 \ jmp loop
+  >resolve                                    \ done:
+  r> drop ;
 
-  \ done:
-  >resolve                                    \ S: ( )
+: gen-interpret ( -- )  \ ( -- )
+  gen-interpret-body
   $c3 c,                                      \ ret
-  r> drop                                     \ clean R
   0 stack-depth ! ;
+
+: gen-evaluate ( -- )  \ ( addr u -- )
+  \ Save old input state to x86 stack
+  $48 c, $8b c, $3c c, $25 c, rt-source-addr d,  \ mov rdi, [rt-source-addr]
+  $57 c,                                         \ push rdi
+  $48 c, $8b c, $3c c, $25 c, rt-source-len d,   \ mov rdi, [rt-source-len]
+  $57 c,                                         \ push rdi
+  $48 c, $8b c, $3c c, $25 c, rt->in d,          \ mov rdi, [rt->in]
+  $57 c,                                         \ push rdi
+  \ Set new input state: addr in rbx, len in rax
+  $48 c, $89 c, $1c c, $25 c, rt-source-addr d,  \ mov [rt-source-addr], rbx
+  $48 c, $89 c, $04 c, $25 c, rt-source-len d,   \ mov [rt-source-len], rax
+  $48 c, $c7 c, $04 c, $25 c, rt->in d, 0 d,     \ mov qword [rt->in], 0
+  \ Run INTERPRET loop (inline, no ret)
+  gen-interpret-body
+  \ Restore old input state
+  $5f c,                                         \ pop rdi
+  $48 c, $89 c, $3c c, $25 c, rt->in d,          \ mov [rt->in], rdi
+  $5f c,                                         \ pop rdi
+  $48 c, $89 c, $3c c, $25 c, rt-source-len d,   \ mov [rt-source-len], rdi
+  $5f c,                                         \ pop rdi
+  $48 c, $89 c, $3c c, $25 c, rt-source-addr d,  \ mov [rt-source-addr], rdi
+  -2 stack-depth +! ;                            \ consumed addr u
 
 \ ============================================================
 \ STRING COMPARE
@@ -2150,6 +2159,7 @@ s" ]" s, 2constant $]
 s" literal" s, 2constant $literal
 s" postpone" s, 2constant $postpone
 s" interpret" s, 2constant $interpret
+s" evaluate" s, 2constant $evaluate
 
 \ ============================================================
 \ TOKENIZER
@@ -2502,6 +2512,7 @@ variable num-neg
   2dup $' str= if 2drop flush-swap ct-flush flush-pending gen-' true exit then
   2dup $>body str= if 2drop flush-swap ct-flush flush-pending gen->body true exit then
   2dup $interpret str= if 2drop flush-swap ct-flush gen-interpret true exit then
+  2dup $evaluate str= if 2drop flush-swap ct-flush flush-pending gen-evaluate true exit then
   2dup $[ str= if 2drop flush-swap ct-flush 0 state ! true exit then
   2dup $] str= if 2drop 1 state ! true exit then
   2dup $literal str= if 2drop interp-val @ ct-push true exit then
@@ -2788,6 +2799,7 @@ variable ret-count 1 ret-count !
 
 : start-def ( addr u -- )
   0 ct-depth !
+  ." DEF: " 2dup type ."  code-here=" code-here . cr
   dict-add
   code-here current-word-addr !
   0 has-io !
@@ -2935,7 +2947,9 @@ variable ret-count 1 ret-count !
 
   \ Set xt = $400000 + 176 + code-offset
   over 24 + @ $FFFFFFFF and        \ code offset (4 bytes, masked)
+  ." ENTRY: offset=" dup .
   $400000 176 + +                  \ absolute code address
+  ." xt=" dup . cr
   $48 c, $bf c, q,                 \ mov rdi, xt
   $48 c, $89 c, $3c c, $25 c, dup 24 + d,  \ mov [rt-entry+24], rdi
 
@@ -2978,10 +2992,15 @@ variable ret-count 1 ret-count !
   0 fixup-count !
   0 ct-depth !
   DATA-BASE 144 + data-here !
+  ." BEFORE PROLOGUE: code-here=" code-here . cr
   gen-prologue
+  ." AFTER PROLOGUE: code-here=" code-here . cr
   emit-rt-parse
+  ." AFTER RT-PARSE: code-here=" code-here . cr
   emit-rt-find
+  ." AFTER RT-FIND: code-here=" code-here . cr
   compile-all
+  ." BEFORE PATCH-START: code-here=" code-here . cr
   patch-start
   \ Reset compiler state for startup code
   0 stack-depth !  0 ct-depth !
@@ -2991,6 +3010,8 @@ variable ret-count 1 ret-count !
   \ Initialize source buffer state for INTERPRET
   $48 c, $c7 c, $04 c, $25 c, rt->in d, 0 d,        \ mov qword [rt->in], 0
   $48 c, $c7 c, $04 c, $25 c, rt-source-len d, 0 d, \ mov qword [rt-source-len], 0
+  $48 c, $bf c, rt-source-buf q,                    \ mov rdi, rt-source-buf
+  $48 c, $89 c, $3c c, $25 c, rt-source-addr d,     \ mov [rt-source-addr], rdi
   \ Emit data initializations from , and c,
   init-count @ 0 ?do
     i init-entry >r
