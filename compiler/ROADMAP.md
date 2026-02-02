@@ -1,14 +1,25 @@
 # Sixth Native Compiler Roadmap
 
-## The Law
+## The Two Laws
 
-**Sixth depends on nothing.**
+**1. Sixth depends on nothing.**
 
-No bash. No shell scripts. No piping. No heredocs. No shelling out.
-
-Every external dependency is a failure. Every line of bash is an admission that Forth is incomplete. The goal is not a small line count — the goal is sovereignty.
+No bash. No shell scripts. No piping. No heredocs. No shelling out. Every external dependency is a failure. Every line of bash is an admission that Forth is incomplete.
 
 When complete, Sixth needs only a kernel that loads ELF binaries. Everything else is Forth.
+
+**2. Sixth outperforms GCC -O2.**
+
+Not "acceptable performance." Not "close enough." Faster. On the benchmarks that matter — recursive functions, tight loops, integer math — Sixth-compiled code beats GCC -O2 compiled C.
+
+This is possible because:
+- Stack caching keeps hot values in registers (no memory traffic)
+- Superinstructions fuse common patterns into single ops
+- Constant folding eliminates work at compile time
+- No function call overhead for small words (inlined)
+- Single-pass compilation means no IR bloat
+
+The goal is not a small line count — the goal is sovereignty AND speed.
 
 ---
 
@@ -77,31 +88,83 @@ Goal: Full interactive Forth system. Interprets, compiles, no C.
 | [ | ( -- ) switch to interpret mode | ~5 |
 | ] | ( -- ) switch to compile mode | ~5 |
 | LITERAL | ( n -- ) compile literal | ~10 |
-| POSTPONE | ( "name" -- ) compile compilation | ~15 |
 
-~35 lines total.
+~20 lines total.
 
-### Phase 4: Defining Words — NOT STARTED
+### Phase 4: Defining Words — MOSTLY DONE
 
 | Word | Purpose | Est. Lines |
 |------|---------|------------|
 | CREATE | DONE (basic form exists) | — |
-| DOES> | ( -- ) set runtime behavior | ~60 |
 | : ; | DONE | — |
 | IMMEDIATE | DONE | — |
 
-~60 lines total.
+POSTPONE and DOES> moved to Phase 5 (depend on INTERPRET/EVALUATE).
 
 ### Phase 5: Interpreter Loop — NOT STARTED
 
 | Word | Purpose | Est. Lines |
 |------|---------|------------|
-| EVALUATE | ( addr u -- ) interpret string | ~40 |
-| QUIT | ( -- ) main interpreter loop | ~30 |
-| ABORT | ( -- ) clear and restart | ~10 |
 | INTERPRET | ( -- ) process input buffer | ~30 |
+| EVALUATE | ( addr u -- ) interpret string | ~40 |
+| ABORT | ( -- ) clear and restart | ~10 |
+| QUIT | ( -- ) main interpreter loop | ~30 |
+| POSTPONE | ( "name" -- ) compile compilation | ~15 |
+| DOES> | ( -- ) set runtime behavior | ~60 |
 
-~110 lines total.
+~185 lines total.
+
+#### Implementation Order
+
+Build in this exact order. Each word depends on the ones before it.
+
+**1. INTERPRET — first**
+- Parses tokens from input buffer
+- Looks up in dictionary (FIND exists)
+- Executes or compiles based on STATE
+- This is the core loop
+
+**2. EVALUATE — second**
+- Takes (addr u), saves current input state
+- Sets new input buffer
+- Calls INTERPRET
+- Restores input state
+- Needed for: compile-time execution, INCLUDE
+
+**3. ABORT — third**
+- Simple: clear stacks, call QUIT
+- Error recovery
+
+**4. QUIT — fourth**
+- Main REPL loop
+- Calls REFILL, INTERPRET, repeats
+- Needs INTERPRET
+
+**5. POSTPONE — fifth**
+- Needs EVALUATE working to test properly
+- Compiles code that compiles
+- Used for defining control structures in Forth
+
+**6. DOES> — sixth**
+- Needs POSTPONE for clean implementation
+- Sets runtime behavior of CREATE'd words
+- Used to define CONSTANT, VARIABLE, etc. in Forth itself
+
+#### Dependency Graph
+
+```
+INTERPRET
+    ↓
+EVALUATE ← needed by INCLUDE, [ ... ]
+    ↓
+POSTPONE ← optional but clean
+    ↓
+DOES>
+
+ABORT → QUIT → INTERPRET (circular, but QUIT is just the loop)
+
+OPEN-FILE → READ-FILE → READ-LINE → INCLUDE → EVALUATE
+```
 
 ### Phase 6: File I/O — PARTIAL
 
@@ -116,6 +179,29 @@ Goal: Full interactive Forth system. Interprets, compiles, no C.
 | INCLUDE | NOT STARTED | ~20 |
 
 ~70 lines total.
+
+#### Implementation Order
+
+**7. OPEN-FILE**
+- Syscall wrapper (open)
+- Returns file handle
+
+**8. READ-FILE**
+- Syscall wrapper (read)
+- Needs file handle from OPEN-FILE
+
+**9. READ-LINE**
+- Uses READ-FILE
+- Scans for newline
+- Used by INCLUDE for line-by-line loading
+
+**10. INCLUDE — last**
+- Opens file (OPEN-FILE)
+- Reads lines (READ-LINE)
+- Evaluates each line (EVALUATE)
+- Closes file
+
+This completes the interpreter. Hayes tests can run.
 
 ### Phase 7: Cleanup — NOT STARTED
 
@@ -161,9 +247,9 @@ See [SIXTH_OS.md](/SIXTH_OS.md).
 |-------|-------|------------|--------|
 | 1. Parsing | ~100 | C lexer | DONE |
 | 2. Dictionary | ~50 | C symbol table | NOT STARTED |
-| 3. State | ~35 | C state machine | NOT STARTED |
-| 4. DOES> | ~60 | C defining words | NOT STARTED |
-| 5. Interpreter | ~110 | C REPL | NOT STARTED |
+| 3. State | ~20 | C state machine | NOT STARTED |
+| 4. Defining words | ~0 | C defining words | MOSTLY DONE |
+| 5. Interpreter | ~185 | C REPL | NOT STARTED |
 | 6. File I/O | ~70 | `cat`, pipes, heredocs | PARTIAL |
 | 7. Cleanup | 0 | **GCC dependency** | NOT STARTED |
 | 8. Native SQLite | ~100 | `sqlite3` shell-out | NOT STARTED |

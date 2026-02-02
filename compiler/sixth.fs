@@ -124,7 +124,16 @@ DATA-BASE 4240 + constant rt->in         \ runtime address of >in
 DATA-BASE 4248 + constant rt-source-len  \ runtime address of source length
 DATA-BASE 4256 + constant rt-word-buf    \ runtime address of WORD buffer
 64 constant WORD-SIZE
-variable data-here  DATA-BASE 4320 + data-here !
+
+\ Runtime dictionary for FIND
+\ Entry: name[24] + xt[8] + flags[8] = 40 bytes
+DATA-BASE 4320 + constant rt-dict-count   \ 8 bytes: number of entries
+DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
+40 constant RT-DICT-ENTRY-SIZE
+256 constant RT-DICT-MAX
+DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
+
+variable data-here  DATA-BASE 14576 + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -140,6 +149,7 @@ variable init-count  0 init-count !
 \ Compilation state
 variable state  0 state !   \ 0=interpret, 1=compile
 variable interp-val  0 interp-val !
+variable rt-find-addr  0 rt-find-addr !  \ Runtime FIND function address
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 
 \ OPTIMIZATION 6: REGISTER-BASED STACK
@@ -1824,6 +1834,146 @@ variable start-jmp
   $0f c, $9f c, $c0 c,                        \ setg al
   $48 c, $0f c, $b6 c, $c0 c, ;               \ movzx rax, al
 
+\ Forward reference helpers for code generation
+: >mark ( -- addr ) code-here 0 c, ;
+: >resolve ( addr -- ) code-here over - 1- swap code-buf + c! ;
+\ 32-bit store for near jump patching
+: d! ( n addr -- )
+  over $FF and over c! 1+
+  over 8 rshift $FF and over c! 1+
+  over 16 rshift $FF and over c! 1+
+  swap 24 rshift swap c! ;
+\ Near (32-bit) forward reference helpers for long jumps
+: >mark32 ( -- addr ) code-here 0 d, ;
+: >resolve32 ( addr -- ) code-here over - 4 - swap code-buf + d! ;
+
+: gen-find ( -- )  \ ( addr u -- xt flag | 0 0 )
+  $49 c, $89 c, $da c,  $49 c, $89 c, $c3 c,  \ r10=addr r11=len
+  $4c c, $8b c, $0c c, $25 c, rt-dict-count d, \ r9=[count]
+  $4d c, $85 c, $c9 c,  $74 c, >mark          \ jz not_found
+  $49 c, $83 c, $fb c, 24 c,  $7d c, >mark    \ jge not_found (len>=24)
+  $31 c, $ff c,  $49 c, $b8 c, rt-dict-buf q, \ edi=0 r8=dict
+  code-here                                   \ loop:
+  $48 c, $6b c, $f7 c, 40 c,  $4c c, $01 c, $c6 c, \ rsi=r8+rdi*40
+  $42 c, $80 c, $3c c, $1e c, 0 c,  $75 c, >mark   \ name[len]!=0? next
+  $57 c,  $4c c, $89 c, $d9 c,  $4c c, $89 c, $d7 c, \ push rdi, rcx=len rdi=input
+  $48 c, $87 c, $f7 c,  $f3 c, $a6 c,  $5f c, \ xchg cmpsb pop
+  $75 c, >mark                                \ jne next
+  \ found: recompute entry from index (rdi preserved)
+  $48 c, $6b c, $f7 c, 40 c,  $4c c, $01 c, $c6 c, \ rsi=r8+rdi*40
+  $48 c, $8b c, $5e c, 24 c,  $48 c, $8b c, $46 c, 32 c, \ rbx=[xt] rax=[flags]
+  $48 c, $83 c, $f8 c, 1 c,  $48 c, $c7 c, $c0 c, -1 d,  \ cmp 1, mov -1
+  $75 c, 7 c,  $48 c, $c7 c, $c0 c, 1 d,  $eb c, >mark   \ jne end, mov 1, jmp end
+  >r >resolve >resolve                        \ next: resolve jne's
+  $ff c, $c7 c,  $4c c, $39 c, $cf c,         \ inc cmp
+  $7c c, code-here - 1- c,                    \ jl loop
+  >resolve >resolve                           \ not_found:
+  $31 c, $c0 c,  $31 c, $db c,                \ rax=0 rbx=0
+  r> >resolve ;                               \ end:
+
+: gen-execute ( -- )  \ ( xt -- )
+  $ff c, $d0 c,                               \ call rax
+  -1 stack-depth +! ;
+
+: emit-rt-find ( -- )
+  \ Emit FIND as a callable runtime function. Save address.
+  $400000 176 + code-here + rt-find-addr !
+  gen-find
+  $c3 c, ;
+
+variable rt-parse-addr  0 rt-parse-addr !
+
+: emit-rt-parse ( -- )
+  \ Emit parse-word as callable runtime function.
+  \ Returns: rbx=addr, rax=len (0 if empty/EOF)
+  $400000 176 + code-here + rt-parse-addr !
+
+  \ Load source state
+  $48 c, $8b c, $34 c, $25 c, rt->in d,       \ mov rsi, [rt->in]
+  $48 c, $8b c, $3c c, $25 c, rt-source-len d, \ mov rdi, [rt-source-len]
+  $49 c, $b8 c, rt-source-buf q,              \ mov r8, rt-source-buf
+
+  \ Skip leading spaces: S: ()
+  code-here                                   \ S: (skip_loop)
+  $48 c, $39 c, $fe c,                        \ cmp rsi, rdi
+  $7d c, >mark                                \ jge eof  S: (skip_loop eof_mark)
+  $42 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
+  $3c c, 32 c,                                \ cmp al, 32
+  $75 c, >mark                                \ jne found_char  S: (skip_loop eof_mark found_mark)
+  $48 c, $ff c, $c6 c,                        \ inc rsi
+  \ backward jump to skip_loop: need skip_loop which is 3rd on stack
+  $eb c, 2 pick code-here - 1- c,             \ jmp skip_loop
+  \ found_char: save word start
+  >resolve                                    \ patch found_char  S: (skip_loop eof_mark)
+  $49 c, $89 c, $f1 c,                        \ mov r9, rsi (word start)
+
+  \ Scan to space/end: reuse stack position for scan_loop
+  code-here nip                               \ S: (scan_loop eof_mark) - replace skip_loop
+  $48 c, $39 c, $fe c,                        \ cmp rsi, rdi
+  $7d c, >mark                                \ jge word_done  S: (scan_loop eof_mark done1)
+  $42 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
+  $3c c, 32 c,                                \ cmp al, 32
+  $74 c, >mark                                \ je word_done  S: (scan_loop eof_mark done1 done2)
+  $48 c, $ff c, $c6 c,                        \ inc rsi
+  \ backward jump to scan_loop
+  $eb c, 3 pick code-here - 1- c,             \ jmp scan_loop
+  \ word_done:
+  >resolve >resolve                           \ patch both done marks  S: (scan_loop eof_mark)
+
+  \ Update >IN and compute result
+  $48 c, $89 c, $34 c, $25 c, rt->in d,       \ mov [rt->in], rsi
+  $4c c, $89 c, $cb c,                        \ mov rbx, r9 (word start)
+  $4c c, $01 c, $c3 c,                        \ add rbx, r8 (addr in rbx)
+  $48 c, $89 c, $f0 c,                        \ mov rax, rsi
+  $4c c, $29 c, $c8 c,                        \ sub rax, r9 (len in rax)
+  $c3 c,                                      \ ret
+
+  \ eof: return 0
+  swap >resolve                               \ patch eof_mark  S: (scan_loop)
+  $31 c, $c0 c,                               \ xor eax, eax
+  $31 c, $db c,                               \ xor ebx, ebx
+  $c3 c,                                      \ ret
+  drop ;                                      \ clean up scan_loop
+
+: gen-interpret ( -- )  \ ( -- )
+  \ Runtime INTERPRET loop: parse words, find in dictionary, execute
+  \ Calls rt-parse and rt-find - total ~50 bytes, all rel8 jumps work
+
+  code-here >r                            \ R: ( loop )
+
+  \ Call parse-word function
+  $48 c, $b8 c, rt-parse-addr @ q,            \ mov rax, rt-parse-addr
+  $ff c, $d0 c,                               \ call rax
+
+  \ Check if empty (len in rax)
+  $48 c, $85 c, $c0 c,                        \ test rax, rax
+  $74 c, >mark                                \ jz done S: ( done )
+
+  \ Call find function (addr in rbx, len in rax)
+  $48 c, $b8 c, rt-find-addr @ q,             \ mov rax, rt-find-addr
+  $ff c, $d0 c,                               \ call rax
+
+  \ Check if found (xt in rbx)
+  $48 c, $85 c, $db c,                        \ test rbx, rbx
+  $74 c, >mark                                \ jz not_found S: ( done nf )
+
+  \ Execute (xt in rbx -> rax, then call)
+  $48 c, $89 c, $d8 c,                        \ mov rax, rbx
+  $ff c, $d0 c,                               \ call rax
+
+  \ Jump back to loop start
+  $eb c, r@ code-here - 1- c,                 \ jmp loop
+
+  \ not_found: skip unknown words
+  >resolve                                    \ S: ( done )
+  $eb c, r@ code-here - 1- c,                 \ jmp loop
+
+  \ done:
+  >resolve                                    \ S: ( )
+  $c3 c,                                      \ ret
+  r> drop                                     \ clean R
+  0 stack-depth ! ;
+
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
@@ -1991,6 +2141,15 @@ s" parse" s, 2constant $parse
 s" word" s, 2constant $word
 s" accept" s, 2constant $accept
 s" refill" s, 2constant $refill
+s" find" s, 2constant $find
+s" execute" s, 2constant $execute
+s" '" s, 2constant $'
+s" >body" s, 2constant $>body
+s" [" s, 2constant $[
+s" ]" s, 2constant $]
+s" literal" s, 2constant $literal
+s" postpone" s, 2constant $postpone
+s" interpret" s, 2constant $interpret
 
 \ ============================================================
 \ TOKENIZER
@@ -2054,6 +2213,15 @@ variable token-len
     1 input-pos +!
     token-len @ 63 >= if token-buf token-len @ exit then
   again ;
+
+: gen-' ( -- )  \ ( "name" -- xt ) - parse at compile time, emit xt as literal
+  get-token dict-find ?dup if
+    dict-addr @ $FFFFFFFF and $4000B0 +
+    push-tos  $48 c, $b8 c, q,  1 stack-depth +!
+  else ." ' unknown word" cr 1 throw then ;
+
+: gen->body ( -- )  \ ( xt -- addr ) extract data addr from CREATE'd word
+  $48 c, $8b c, $40 c, 2 c, ;  \ mov rax, [rax+2]
 
 \ ============================================================
 \ NUMBER PARSER
@@ -2329,6 +2497,14 @@ variable num-neg
   2dup $word str= if 2drop flush-swap ct-flush flush-pending gen-word true exit then
   2dup $accept str= if 2drop flush-swap ct-flush flush-pending gen-accept true exit then
   2dup $refill str= if 2drop flush-swap ct-flush gen-refill true exit then
+  2dup $find str= if 2drop flush-swap ct-flush flush-pending gen-find true exit then
+  2dup $execute str= if 2drop flush-swap ct-flush flush-pending gen-execute true exit then
+  2dup $' str= if 2drop flush-swap ct-flush flush-pending gen-' true exit then
+  2dup $>body str= if 2drop flush-swap ct-flush flush-pending gen->body true exit then
+  2dup $interpret str= if 2drop flush-swap ct-flush gen-interpret true exit then
+  2dup $[ str= if 2drop flush-swap ct-flush 0 state ! true exit then
+  2dup $] str= if 2drop 1 state ! true exit then
+  2dup $literal str= if 2drop interp-val @ ct-push true exit then
   \ ---- Control flow: flush, then normal ----
   2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
   2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
@@ -2693,6 +2869,8 @@ variable ret-count 1 ret-count !
   2dup $c, str= if
     2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
   then
+  2dup $] str= if 2drop 1 state ! exit then
+  2dup $literal str= if 2drop interp-val @ ct-push exit then
   state @ if
     compile-token
   else
@@ -2722,6 +2900,61 @@ variable ret-count 1 ret-count !
   again ;
 
 \ ============================================================
+\ RUNTIME DICTIONARY INITIALIZATION
+\ ============================================================
+
+: emit-dict-count ( -- )
+  \ mov qword [rt-dict-count], dict-count
+  $48 c, $c7 c, $04 c, $25 c, rt-dict-count d, dict-count @ d, ;
+
+: emit-dict-entry ( i -- )
+  \ Emit code to initialize runtime dict entry i from compile-time entry i
+  \ Runtime entry: name[24] + xt[8] + flags[8] = 40 bytes
+  \ Compile-time:  name[24] + addr[4] + flags[4] = 32 bytes
+  dup 32 * dict-buf +              \ ct-entry address
+  swap 40 * rt-dict-buf +          \ rt-entry address
+  \ Stack: ct-entry rt-entry
+
+  \ Copy name qword 0 (bytes 0-7)
+  over @ ?dup if
+    $48 c, $bf c, q,               \ mov rdi, value
+    $48 c, $89 c, $3c c, $25 c, dup d,  \ mov [rt-entry], rdi
+  then
+
+  \ Copy name qword 1 (bytes 8-15)
+  over 8 + @ ?dup if
+    $48 c, $bf c, q,
+    $48 c, $89 c, $3c c, $25 c, dup 8 + d,
+  then
+
+  \ Copy name qword 2 (bytes 16-23)
+  over 16 + @ ?dup if
+    $48 c, $bf c, q,
+    $48 c, $89 c, $3c c, $25 c, dup 16 + d,
+  then
+
+  \ Set xt = $400000 + 176 + code-offset
+  over 24 + @ $FFFFFFFF and        \ code offset (4 bytes, masked)
+  $400000 176 + +                  \ absolute code address
+  $48 c, $bf c, q,                 \ mov rdi, xt
+  $48 c, $89 c, $3c c, $25 c, dup 24 + d,  \ mov [rt-entry+24], rdi
+
+  \ Set flags (if non-zero) - use mov dword since flags fit in 32 bits
+  over 28 + @ $FFFFFFFF and        \ ct-entry rt-entry flags
+  dup if
+    $c7 c, $04 c, $25 c,
+    over 32 + d,                   \ address: rt-entry+32
+    d,                             \ value: flags
+  else drop then
+
+  2drop ;
+
+: emit-dict-init ( -- )
+  \ Emit code to initialize runtime dictionary from compile-time dictionary
+  emit-dict-count
+  dict-count @ 0 ?do i emit-dict-entry loop ;
+
+\ ============================================================
 \ MAIN
 \ ============================================================
 
@@ -2746,6 +2979,8 @@ variable ret-count 1 ret-count !
   0 ct-depth !
   DATA-BASE 144 + data-here !
   gen-prologue
+  emit-rt-parse
+  emit-rt-find
   compile-all
   patch-start
   \ Reset compiler state for startup code
@@ -2753,6 +2988,9 @@ variable ret-count 1 ret-count !
   0 swap-pending !  0 dup-pending !  0 cmp-pending !
   \ Initialize base variable to 10
   $48 c, $c7 c, $04 c, $25 c, rt-base d, 10 d,  \ mov qword [rt-base], 10
+  \ Initialize source buffer state for INTERPRET
+  $48 c, $c7 c, $04 c, $25 c, rt->in d, 0 d,        \ mov qword [rt->in], 0
+  $48 c, $c7 c, $04 c, $25 c, rt-source-len d, 0 d, \ mov qword [rt-source-len], 0
   \ Emit data initializations from , and c,
   init-count @ 0 ?do
     i init-entry >r
@@ -2766,6 +3004,8 @@ variable ret-count 1 ret-count !
     then
     r> drop
   loop
+  \ Initialize runtime dictionary for FIND
+  emit-dict-init
   $main dict-find
   ?dup if
     0 call-nargs !  0 call-rets !
