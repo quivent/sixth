@@ -152,6 +152,7 @@ variable state  0 state !   \ 0=interpret, 1=compile
 variable interp-val  0 interp-val !
 variable rt-find-addr  0 rt-find-addr !  \ Runtime FIND function address
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
+variable full-source  0 full-source !  \ 0=fast (direct rt-source-buf), 1=full (indirect rt-source-addr)
 
 \ OPTIMIZATION 6: REGISTER-BASED STACK
 \ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
@@ -1733,7 +1734,11 @@ variable start-jmp
 : gen-source ( -- )
   \ ( -- addr u ) push input buffer address and length
   push-tos
-  $48 c, $b8 c, rt-source-buf q,              \ mov rax, rt-source-buf (addr)
+  full-source @ if
+    $48 c, $8b c, $04 c, $25 c, rt-source-addr d,  \ mov rax, [rt-source-addr] (indirect)
+  else
+    $48 c, $b8 c, rt-source-buf q,                 \ mov rax, rt-source-buf (direct)
+  then
   push-tos
   $48 c, $8b c, $04 c, $25 c, rt-source-len d, ; \ mov rax, [rt-source-len] (len)
 
@@ -1850,7 +1855,7 @@ variable start-jmp
 : >resolve32 ( addr -- ) code-here over - 4 - swap code-buf + d! ;
 
 : gen-find ( -- )  \ ( addr u -- xt flag | 0 0 )
-  $49 c, $89 c, $da c,  $49 c, $89 c, $c3 c,  \ r10=addr r11=len
+  $49 c, $89 c, $da c,  $49 c, $89 c, $c3 c,  \ r10=rbx(addr) r11=rax(len)
   $4c c, $8b c, $0c c, $25 c, rt-dict-count d, \ r9=[count]
   $4d c, $85 c, $c9 c,  $74 c, >mark          \ jz not_found
   $49 c, $83 c, $fb c, 24 c,  $7d c, >mark    \ jge not_found (len>=24)
@@ -1863,7 +1868,7 @@ variable start-jmp
   $75 c, >mark                                \ jne next
   \ found: recompute entry from index (rdi preserved)
   $48 c, $6b c, $f7 c, 40 c,  $4c c, $01 c, $c6 c, \ rsi=r8+rdi*40
-  $48 c, $8b c, $5e c, 24 c,  $48 c, $8b c, $46 c, 32 c, \ rbx=[xt] rax=[flags]
+  $48 c, $8b c, $5e c, 24 c,  $8b c, $46 c, 32 c, \ rbx=[xt] rax=[flags] (eax - 4 bytes)
   $48 c, $83 c, $f8 c, 1 c,  $48 c, $c7 c, $c0 c, -1 d,  \ cmp 1, mov -1
   $75 c, 7 c,  $48 c, $c7 c, $c0 c, 1 d,  $eb c, >mark   \ jne end, mov 1, jmp end
   >r >resolve >resolve                        \ next: resolve jne's
@@ -1899,7 +1904,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   code-here                                   \ S: (skip_loop)
   $48 c, $39 c, $fe c,                        \ cmp rsi, rdi
   $7d c, >mark                                \ jge eof  S: (skip_loop eof_mark)
-  $42 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
+  $41 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
   $3c c, 32 c,                                \ cmp al, 32
   $75 c, >mark                                \ jne found_char  S: (skip_loop eof_mark found_mark)
   $48 c, $ff c, $c6 c,                        \ inc rsi
@@ -1910,10 +1915,10 @@ variable rt-parse-addr  0 rt-parse-addr !
   $49 c, $89 c, $f1 c,                        \ mov r9, rsi (word start)
 
   \ Scan to space/end: reuse stack position for scan_loop
-  code-here nip                               \ S: (scan_loop eof_mark) - replace skip_loop
+  code-here swap rot drop                     \ S: (scan_loop eof_mark) - replace skip_loop
   $48 c, $39 c, $fe c,                        \ cmp rsi, rdi
   $7d c, >mark                                \ jge word_done  S: (scan_loop eof_mark done1)
-  $42 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
+  $41 c, $0f c, $b6 c, $04 c, $30 c,          \ movzx eax, byte [r8+rsi]
   $3c c, 32 c,                                \ cmp al, 32
   $74 c, >mark                                \ je word_done  S: (scan_loop eof_mark done1 done2)
   $48 c, $ff c, $c6 c,                        \ inc rsi
@@ -1931,7 +1936,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   $c3 c,                                      \ ret
 
   \ eof: return 0
-  swap >resolve                               \ patch eof_mark  S: (scan_loop)
+  >resolve                                    \ patch eof_mark  S: (scan_loop)
   $31 c, $c0 c,                               \ xor eax, eax
   $31 c, $db c,                               \ xor ebx, ebx
   $c3 c,                                      \ ret
@@ -1940,12 +1945,12 @@ variable rt-parse-addr  0 rt-parse-addr !
 : gen-interpret-body ( -- )
   \ INTERPRET loop - parse words, find them, execute them
   code-here >r                                \ R: ( loop )
-  $48 c, $b8 c, rt-parse-addr @ q,            \ mov rax, rt-parse-addr
-  $ff c, $d0 c,                               \ call rax  -> rbx=addr, rax=len
+  $49 c, $b8 c, rt-parse-addr @ q,            \ mov r8, rt-parse-addr
+  $41 c, $ff c, $d0 c,                        \ call r8  -> rbx=addr, rax=len
   $48 c, $85 c, $c0 c,                        \ test rax, rax
   $74 c, >mark                                \ jz done
-  $48 c, $b8 c, rt-find-addr @ q,             \ mov rax, rt-find-addr
-  $ff c, $d0 c,                               \ call rax  -> rbx=xt, rax=flag (or 0,0)
+  $49 c, $b8 c, rt-find-addr @ q,             \ mov r8, rt-find-addr
+  $41 c, $ff c, $d0 c,                        \ call r8  -> rbx=xt, rax=flag (or 0,0)
   $48 c, $85 c, $db c,                        \ test rbx, rbx
   $74 c, >mark                                \ jz not_found
   $ff c, $d3 c,                               \ call rbx (execute found word)
@@ -2991,7 +2996,7 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 144 + data-here !
+  DATA-BASE 14584 + data-here !
   ." BEFORE PROLOGUE: code-here=" code-here . cr
   gen-prologue
   ." AFTER PROLOGUE: code-here=" code-here . cr
@@ -3002,6 +3007,7 @@ variable ret-count 1 ret-count !
   compile-all
   ." BEFORE PATCH-START: code-here=" code-here . cr
   patch-start
+  ." AFTER-PATCH: code-here=" code-here . cr
   \ Reset compiler state for startup code
   0 stack-depth !  0 ct-depth !
   0 swap-pending !  0 dup-pending !  0 cmp-pending !
@@ -3012,6 +3018,7 @@ variable ret-count 1 ret-count !
   $48 c, $c7 c, $04 c, $25 c, rt-source-len d, 0 d, \ mov qword [rt-source-len], 0
   $48 c, $bf c, rt-source-buf q,                    \ mov rdi, rt-source-buf
   $48 c, $89 c, $3c c, $25 c, rt-source-addr d,     \ mov [rt-source-addr], rdi
+  ." AFTER-INIT: code-here=" code-here . cr
   \ Emit data initializations from , and c,
   init-count @ 0 ?do
     i init-entry >r
@@ -3025,12 +3032,16 @@ variable ret-count 1 ret-count !
     then
     r> drop
   loop
+  ." AFTER-DATA-INIT: code-here=" code-here . cr
   \ Initialize runtime dictionary for FIND
   emit-dict-init
+  ." AFTER-DICT-INIT: code-here=" code-here . cr
   $main dict-find
   ?dup if
     0 call-nargs !  0 call-rets !
-    dict-addr @ gen-call
+    dict-addr @ $FFFFFFFF and
+    ." GEN-CALL: target=" dup . ." at=" code-here . cr
+    gen-call
   then
   gen-cr
   gen-epilogue
