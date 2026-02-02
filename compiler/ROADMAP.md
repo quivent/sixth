@@ -53,100 +53,104 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 
 ---
 
+## Linear Checklist
+
+**What remains, in order:**
+
+```
+[ ] 1.  '        ( "name" -- xt )         parse and find
+[ ] 2.  [']      ( "name" -- )            compile xt as literal
+[ ] 3.  >BODY    ( xt -- addr )           get data field
+[ ] 4.  [        ( -- )                   switch to interpret mode (immediate)
+[ ] 5.  ]        ( -- )                   switch to compile mode
+[ ] 6.  LITERAL  ( n -- )                 compile literal (immediate)
+[ ] 7.  ABORT    ( -- )                   clear stacks, restart
+[ ] 8.  QUIT     ( -- )                   main REPL loop
+[ ] 9.  POSTPONE ( "name" -- )            compile compilation (immediate)
+[ ] 10. DOES>    ( -- )                   set runtime behavior
+[ ] 11. OPEN-FILE                         syscall wrapper
+[ ] 12. READ-FILE                         syscall wrapper
+[ ] 13. READ-LINE                         line-by-line reading
+[ ] 14. INCLUDE  ( "name" -- )            load and evaluate file
+------- SELF-HOSTING COMPLETE -------
+[ ] 15. Delete engine/                    remove C interpreter
+[ ] 16. Forth test framework              replace bash test runner
+------- SOVEREIGNTY COMPLETE -------
+```
+
+**Already done:**
+- [x] SOURCE, >IN, PARSE, WORD, ACCEPT, REFILL (Phase 1)
+- [x] FIND, EXECUTE (runtime dictionary lookup)
+- [x] INTERPRET, EVALUATE (interpreter loop core)
+- [x] STATE, CREATE, : ; IMMEDIATE (defining words)
+
+---
+
 ## Self-Hosting Roadmap
 
 Goal: Full interactive Forth system. Interprets, compiles, no C.
 
 ### Phase 1: Input Parsing — DONE
 
+### Phase 2: Dictionary — MOSTLY DONE
+
 | Word | Status |
 |------|--------|
-| SOURCE | DONE |
-| >IN | DONE |
-| PARSE | DONE |
-| WORD | DONE |
-| ACCEPT | DONE |
-| REFILL | DONE |
-
-### Phase 2: Dictionary — NOT STARTED
-
-| Word | Purpose | Est. Lines |
-|------|---------|------------|
-| FIND | ( addr u -- xt flag ) standard lookup | ~20 |
-| ' | ( "name" -- xt ) parse and find | ~10 |
-| ['] | ( "name" -- ) compile xt as literal | ~10 |
-| EXECUTE | ( xt -- ) call execution token | ~5 |
-| >BODY | ( xt -- addr ) get data field | ~5 |
-
-~50 lines total.
+| FIND | DONE |
+| EXECUTE | DONE |
+| ' | NOT STARTED |
+| ['] | NOT STARTED |
+| >BODY | NOT STARTED |
 
 ### Phase 3: State Machine — NOT STARTED
 
-| Word | Purpose | Est. Lines |
-|------|---------|------------|
-| STATE | ( -- addr ) compilation state variable | DONE (exists) |
-| [ | ( -- ) switch to interpret mode | ~5 |
-| ] | ( -- ) switch to compile mode | ~5 |
-| LITERAL | ( n -- ) compile literal | ~10 |
+| Word | Status |
+|------|--------|
+| STATE | DONE |
+| [ | NOT STARTED |
+| ] | NOT STARTED |
+| LITERAL | NOT STARTED |
 
-~20 lines total.
+### Phase 4: Defining Words — DONE
 
-### Phase 4: Defining Words — MOSTLY DONE
+| Word | Status |
+|------|--------|
+| CREATE | DONE |
+| : ; | DONE |
+| IMMEDIATE | DONE |
 
-| Word | Purpose | Est. Lines |
-|------|---------|------------|
-| CREATE | DONE (basic form exists) | — |
-| : ; | DONE | — |
-| IMMEDIATE | DONE | — |
+### Phase 5: Interpreter Loop — PARTIAL
 
-POSTPONE and DOES> moved to Phase 5 (depend on INTERPRET/EVALUATE).
-
-### Phase 5: Interpreter Loop — NOT STARTED
-
-| Word | Purpose | Est. Lines |
-|------|---------|------------|
-| INTERPRET | ( -- ) process input buffer | ~30 |
-| EVALUATE | ( addr u -- ) interpret string | ~40 |
-| ABORT | ( -- ) clear and restart | ~10 |
-| QUIT | ( -- ) main interpreter loop | ~30 |
-| POSTPONE | ( "name" -- ) compile compilation | ~15 |
-| DOES> | ( -- ) set runtime behavior | ~60 |
-
-~185 lines total.
+| Word | Status |
+|------|--------|
+| INTERPRET | DONE |
+| EVALUATE | DONE |
+| ABORT | NOT STARTED |
+| QUIT | NOT STARTED |
+| POSTPONE | NOT STARTED |
+| DOES> | NOT STARTED |
 
 #### Implementation Order
 
 Build in this exact order. Each word depends on the ones before it.
 
-**1. INTERPRET — first**
-- Parses tokens from input buffer
-- Looks up in dictionary (FIND exists)
-- Executes or compiles based on STATE
-- This is the core loop
+**1. INTERPRET — DONE**
 
-**2. EVALUATE — second**
-- Takes (addr u), saves current input state
-- Sets new input buffer
-- Calls INTERPRET
-- Restores input state
-- Needed for: compile-time execution, INCLUDE
+**2. EVALUATE — DONE**
 
-**3. ABORT — third**
+**3. ABORT — next**
 - Simple: clear stacks, call QUIT
 - Error recovery
 
-**4. QUIT — fourth**
+**4. QUIT — after ABORT**
 - Main REPL loop
 - Calls REFILL, INTERPRET, repeats
-- Needs INTERPRET
 
-**5. POSTPONE — fifth**
-- Needs EVALUATE working to test properly
+**5. POSTPONE**
 - Compiles code that compiles
 - Used for defining control structures in Forth
 
-**6. DOES> — sixth**
-- Needs POSTPONE for clean implementation
+**6. DOES>**
 - Sets runtime behavior of CREATE'd words
 - Used to define CONSTANT, VARIABLE, etc. in Forth itself
 
