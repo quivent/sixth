@@ -149,6 +149,7 @@ variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit 
 create do-trip 8 cells allot              \ known trip count per nesting level (-1=unknown)
 create do-origin 8 cells allot            \ code-here before gen-do emitted anything
 create do-sdepth 8 cells allot            \ stack-depth before gen-do
+create do-leave 8 cells allot             \ leave patch address per level (0=none)
 
 \ Compile-time constant stack for literal folding/fusion
 create ct-stack 8 cells allot
@@ -1272,6 +1273,7 @@ variable call-rets   1 call-rets !
 
 : gen-do ( -- do-addr )
   1 do-depth +!
+  0 do-depth @ 1- cells do-leave + !  \ clear leave patch for this level
   $41 c, $54 c,
   $41 c, $55 c,
   $49 c, $89 c, $dd c,
@@ -1323,6 +1325,10 @@ variable call-rets   1 call-rets !
   code-here swap 4 - patch-rel32
   $41 c, $5d c,
   $41 c, $5c c,
+  \ Patch any pending leave for this loop level (after pops)
+  do-depth @ 1- cells do-leave + @ ?dup if
+    code-here swap 4 - patch-rel32
+  then
   -1 do-depth +! ;
 
 : gen-+loop ( -- )
@@ -1344,6 +1350,10 @@ variable call-rets   1 call-rets !
   code-here swap 4 - patch-rel32
   $41 c, $5d c,
   $41 c, $5c c,
+  \ Patch any pending leave for this loop level (after pops)
+  do-depth @ 1- cells do-leave + @ ?dup if
+    code-here swap 4 - patch-rel32
+  then
   -1 do-depth +! ;
 
 : gen-i ( -- )
@@ -1353,6 +1363,13 @@ variable call-rets   1 call-rets !
 : gen-j ( -- )
   push-tos
   $48 c, $8b c, $44 c, $24 c, 8 c, ;
+
+: gen-leave ( -- )
+  \ Emit: pop r13, pop r12, jmp forward (to after loop)
+  $41 c, $5d c,                  \ pop r13
+  $41 c, $5c c,                  \ pop r12
+  $e9 c, 0 d,                    \ jmp rel32 (placeholder)
+  code-here do-depth @ 1- cells do-leave + ! ;  \ save patch addr
 
 \ ============================================================
 \ RECURSE
@@ -1732,6 +1749,7 @@ s" loop" s, 2constant $loop
 s" +loop" s, 2constant $+loop
 s" i" s, 2constant $i
 s" j" s, 2constant $j
+s" leave" s, 2constant $leave
 s" recurse" s, 2constant $recurse
 s" exit" s, 2constant $exit
 s" >r" s, 2constant $>r
@@ -2156,6 +2174,7 @@ variable num-neg
   2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop true exit then
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
   2dup $j str= if 2drop flush-swap ct-flush gen-j true exit then
+  2dup $leave str= if 2drop flush-swap ct-flush gen-leave true exit then
   2dup $recurse str= if 2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
   2dup $>r str= if 2drop flush-swap ct-flush gen->r true exit then
   2dup $r> str= if 2drop flush-swap ct-flush gen-r> true exit then
