@@ -140,6 +140,19 @@ Direct syscalls to SQLite shared library. No more `system("sqlite3 ...")`.
 
 **Result**: `./sixth test.fs` runs all tests. No bash anywhere.
 
+### Phase 10: Bare Metal — FUTURE
+
+See [SIXTH_OS.md](/SIXTH_OS.md).
+
+| Task | Lines | Eliminates |
+|------|-------|------------|
+| Replace syscalls with VGA/keyboard | ~35 | Linux kernel |
+| Block-based source loading | ~30 | filesystem |
+| Remove ELF generation | -80 | ELF loader |
+| colorForth integration | ~20 | BIOS/UEFI |
+
+**Result**: Boot from BIOS. No Linux. No C. ~3000 lines from power-on to native code.
+
 ---
 
 ## Summary
@@ -155,12 +168,54 @@ Direct syscalls to SQLite shared library. No more `system("sqlite3 ...")`.
 | 7. Cleanup | 0 | **GCC dependency** | NOT STARTED |
 | 8. Native SQLite | ~100 | `sqlite3` shell-out | NOT STARTED |
 | 9. Test framework | ~80 | bash test runner | NOT STARTED |
+| 10. Bare metal | -15 | **Linux kernel** | FUTURE |
 
 | Milestone | Lines | Depends On |
 |-----------|-------|------------|
-| Current | 2800 | C, bash |
-| After Phase 7 | ~3125 | bash |
-| After Phase 9 | ~3305 | **nothing** |
+| Current | 2800 | C, bash, Linux |
+| After Phase 7 | ~3125 | bash, Linux |
+| After Phase 9 | ~3305 | Linux |
+| After Phase 10 | ~3290 | **nothing** |
+
+---
+
+## Complexity Analysis
+
+The compiler was the hard part. Everything else is easier.
+
+### What's Done
+
+| Task | Lines | Complexity | Notes |
+|------|-------|------------|-------|
+| Learn Forth | 0 | High | New paradigm, unlearn assumptions |
+| Understand native compilation | 0 | High | Insight: Forth is already optimizable |
+| Write native x86-64 compiler | 2800 | High | Stack caching, superinstructions, register allocation |
+
+### What Remains
+
+| Phase | Lines | Complexity | Why |
+|-------|-------|------------|-----|
+| No C (7) | ~325 | Medium | Known problem: FIND, EXECUTE, EVALUATE |
+| No bash (8-9) | ~180 | Low | Plumbing, not insight |
+| No Linux (10) | ~5 | **Trivial** | colorForth exists. Delete ELF code. Change 65 lines. |
+
+### The Ratio
+
+| Phase | % of compiler | Nature of work |
+|-------|---------------|----------------|
+| No C | 12% | Last real intellectual work (interpreter loop) |
+| No bash | 6% | Mechanical (syscalls, test harness) |
+| No Linux | 0.2% | **Removal** (ELF gone, syscalls simplified) |
+
+### The Insight
+
+Phase 10 (bare metal) is the *easiest* phase. You're not writing an OS — Chuck Moore already wrote colorForth in 2001. You're:
+
+1. Deleting 80 lines of ELF generation
+2. Replacing 65 lines of Linux syscalls with direct hardware calls
+3. Done
+
+The path to bare metal is shorter than the path already walked.
 
 ---
 
@@ -187,3 +242,9 @@ Sovereignty complete when:
 4. `rm -rf engine/` — no C required
 5. Hayes Core tests pass
 6. Zero shell-outs in any Sixth program
+
+Ultimate sovereignty (Phase 10):
+
+7. Boots from BIOS — no Linux
+8. ~3000 lines from power-on to native code
+9. Depends on nothing but electricity
