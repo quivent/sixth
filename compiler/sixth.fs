@@ -410,6 +410,45 @@ variable fixup-target  0 fixup-target !
   $48 c, $87 c, $c1 c,           \ xchg rax, rcx  (rax=b, rcx=d)
   $49 c, $87 c, $1f c, ;         \ xchg rbx, [r15] (rbx=a, [r15]=c)
 
+: gen-2over ( -- )
+  \ ( a b c d -- a b c d a b ) d=rax, c=rbx, b=rcx, a=[r15]
+  \ Save b (rcx) and a ([r15]) to x86 stack before registers shift
+  $51 c,                          \ push rcx (save b)
+  $49 c, $ff c, $37 c,           \ push [r15] (save a)
+  push-tos                        \ make room for first value
+  $58 c,                          \ pop rax (a)
+  push-tos                        \ make room for second value
+  $58 c, ;                        \ pop rax (b)
+
+: gen-depth ( -- )
+  \ Push current stack depth as a value (subtract 1 for phantom TOS)
+  stack-depth @ 1- dup           \ actual depth = tracker - 1
+  push-tos
+  0= if drop $31 c, $c0 c,       \ xor eax, eax (depth = 0)
+  else $48 c, $c7 c, $c0 c, d,   \ mov rax, imm32
+  then ;
+
+: gen-pick ( -- )
+  \ ( xu...x1 x0 u -- xu...x1 x0 xu )
+  \ u is in rax. x0 is in rbx, x1 in rcx, x2+ in [r15...]
+  \ u=0 → get rbx, u=1 → get rcx, u>=2 → get [r15 + (u-2)*8]
+  $48 c, $89 c, $c7 c,           \ mov rdi, rax (save index)
+  $48 c, $83 c, $ff c, 2 c,      \ cmp rdi, 2
+  $7c c, 19 c,                   \ jl +19 (skip 19 bytes of memory case)
+  \ Memory case: [r15 + (rdi-2)*8] — 19 bytes total
+  $48 c, $83 c, $ef c, 2 c,      \ sub rdi, 2 (4)
+  $48 c, $c1 c, $e7 c, 3 c,      \ shl rdi, 3 (4)
+  $49 c, $01 c, $ff c,           \ add r15, rdi (3)
+  $49 c, $8b c, $07 c,           \ mov rax, [r15] (3)
+  $49 c, $29 c, $ff c,           \ sub r15, rdi (3)
+  $eb c, 13 c,                   \ jmp done, skip 13 bytes (2)
+  \ Register case (u=0 or u=1): — 13 bytes total
+  $48 c, $85 c, $ff c,           \ test rdi, rdi (3)
+  $75 c, 5 c,                    \ jnz +5 (2)
+  $48 c, $89 c, $d8 c,           \ mov rax, rbx (u=0: x0) (3)
+  $eb c, 3 c,                    \ jmp done (2)
+  $48 c, $89 c, $c8 c, ;         \ mov rax, rcx (u=1: x1) (3)
+
 : gen-space ( -- )
   \ emit space character via write syscall
   1 has-io !
@@ -1726,6 +1765,9 @@ s" space" s, 2constant $space
 s" -rot" s, 2constant $-rot
 s" ?dup" s, 2constant $?dup
 s" 2swap" s, 2constant $2swap
+s" 2over" s, 2constant $2over
+s" depth" s, 2constant $depth
+s" pick" s, 2constant $pick
 s" move" s, 2constant $move
 s" fill" s, 2constant $fill
 s" [char]" s, 2constant $[char]
@@ -1917,6 +1959,9 @@ variable num-neg
   2dup $-rot str= if 2drop flush-swap ct-flush gen--rot true exit then
   2dup $?dup str= if 2drop flush-swap ct-flush gen-?dup true exit then
   2dup $2swap str= if 2drop flush-swap ct-flush gen-2swap true exit then
+  2dup $2over str= if 2drop flush-swap ct-flush gen-2over true exit then
+  2dup $depth str= if 2drop flush-swap ct-flush gen-depth true exit then
+  2dup $pick str= if 2drop flush-swap ct-flush gen-pick true exit then
   \ ---- Binary arithmetic with fold/fuse ----
   2dup $+ str= if 2drop flush-cmp
     ct-depth @ 0= if 0 swap-pending ! else flush-swap then
