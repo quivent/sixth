@@ -713,6 +713,21 @@ variable cmp-pending   0 cmp-pending !
 : gen-xor-imm ( n -- )  $48 c, $35 c, d, ;
 
 \ ============================================================
+\ STRENGTH REDUCTION - multiply/modulo by powers of 2
+\ ============================================================
+
+: power-of-2? ( n -- flag )
+  dup 1 < if drop false exit then   \ n <= 0 means not power of 2
+  dup 1- and 0= ;
+
+: log2 ( n -- shift )
+  0 swap begin dup 1 > while 1 rshift swap 1+ swap repeat drop ;
+
+: gen-lshift-imm ( n -- )
+  dup 1 = if drop $48 c, $01 c, $c0 c,      \ add rax, rax
+  else $48 c, $c1 c, $e0 c, c, then ;       \ shl rax, N
+
+\ ============================================================
 \ COMPARISON (result: 0 or -1)
 \ ============================================================
 
@@ -784,6 +799,30 @@ variable cmp-pending   0 cmp-pending !
   $0f c, $95 c, $c0 c,           \ setne al
   $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
   $48 c, $f7 c, $d8 c, ;        \ neg rax
+
+: gen-within ( -- )
+  \ ( u lo hi -- flag ) true if lo <= u < hi
+  \ Equivalent to: over - >r - r> u<
+  \ hi=rax, lo=rbx, u=rcx or [r15]
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $cf c,           \ mov rdi, rcx (u)
+  else
+    $49 c, $8b c, $3f c,           \ mov rdi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,     \ add r15, 8
+  then
+  $48 c, $29 c, $d8 c,             \ sub rax, rbx (hi - lo)
+  $48 c, $29 c, $df c,             \ sub rdi, rbx (u - lo)
+  $48 c, $39 c, $c7 c,             \ cmp rdi, rax
+  $0f c, $92 c, $c0 c,             \ setb al
+  $48 c, $0f c, $b6 c, $c0 c,     \ movzx rax, al
+  $48 c, $f7 c, $d8 c,             \ neg rax
+  -2 stack-depth +! ;
+
+: gen-count ( -- )
+  \ ( c-addr -- c-addr+1 u ) get length byte, advance address
+  push-tos
+  $48 c, $0f c, $b6 c, $03 c,     \ movzx rax, byte [rbx]
+  $48 c, $ff c, $c3 c, ;          \ inc rbx
 
 : gen-min ( -- )
   \ ( a b -- min ) b=rax, a=rbx. cmp rbx,rax; cmovl rax,rbx
@@ -1758,6 +1797,8 @@ s" +loop" s, 2constant $+loop
 s" i" s, 2constant $i
 s" j" s, 2constant $j
 s" leave" s, 2constant $leave
+s" within" s, 2constant $within
+s" count" s, 2constant $count
 s" recurse" s, 2constant $recurse
 s" exit" s, 2constant $exit
 s" >r" s, 2constant $>r
@@ -2011,14 +2052,21 @@ variable num-neg
   2dup $* str= if 2drop flush-cmp
     ct-depth @ 0= if 0 swap-pending ! else flush-swap then
     ct-depth @ 2 >= if ct-pop ct-pop * ct-push
-    else ct-depth @ 1 = if ct-pop flush-pending gen-mul-imm
+    else ct-depth @ 1 = if
+      ct-pop dup power-of-2? if
+        flush-pending log2 gen-lshift-imm
+      else flush-pending gen-mul-imm then
     else flush-pending gen-mul then then true exit then
   2dup $/ str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap / ct-push
     else ct-flush flush-pending gen-div then true exit then
   2dup $mod str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap mod ct-push
-    else ct-flush flush-pending gen-mod then true exit then
+    else ct-depth @ 1 = if
+      ct-pop dup power-of-2? if
+        1- flush-pending gen-and-imm   \ n mod 2^k = n and (2^k - 1)
+      else ct-push ct-flush flush-pending gen-mod then
+    else ct-flush flush-pending gen-mod then then true exit then
   2dup $/mod str= if 2drop flush-swap
     ct-depth @ 2 >= if ct-pop ct-pop swap /mod >r ct-push r> ct-push
     else ct-flush flush-pending gen-/mod then true exit then
@@ -2184,6 +2232,8 @@ variable num-neg
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
   2dup $j str= if 2drop flush-swap ct-flush gen-j true exit then
   2dup $leave str= if 2drop flush-swap ct-flush gen-leave true exit then
+  2dup $within str= if 2drop flush-swap ct-flush flush-pending gen-within true exit then
+  2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
   2dup $recurse str= if 2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
   2dup $>r str= if 2drop flush-swap ct-flush gen->r true exit then
   2dup $r> str= if 2drop flush-swap ct-flush gen-r> true exit then
@@ -2472,13 +2522,10 @@ variable ret-count 1 ret-count !
     2drop get-token
     dup 0= if 2drop ." Expected name after constant" cr 1 throw then
     dict-add
-    get-token
-    dup 0= if 2drop ." Expected value after constant name" cr 1 throw then
-    parse-number if
-      $48 c, $b8 c, q,
-      $c3 c,
-      5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
-    else ." Bad constant value" cr 1 throw then
+    \ Use interp-val (set by preceding number in interpret mode)
+    $48 c, $b8 c, interp-val @ q,
+    $c3 c,
+    5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     exit
   then
   2dup $create str= if
@@ -2503,8 +2550,20 @@ variable ret-count 1 ret-count !
     compile-token
   else
     2dup parse-number if nip nip interp-val ! else
-      ." Unexpected token in interpret mode: " type cr
-      1 throw
+      \ Try dictionary lookup for constants
+      2dup dict-find ?dup if
+        nip nip
+        dup dict-flags @ $800 and if
+          \ Inline constant: extract value from stub
+          dict-addr @ $FFFFFFFF and 2 + code-buf + @ interp-val !
+        else
+          ." Unexpected word in interpret mode: " 2drop type cr
+          1 throw
+        then
+      else
+        ." Unexpected token in interpret mode: " type cr
+        1 throw
+      then
     then
   then ;
 
