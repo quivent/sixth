@@ -1,77 +1,7 @@
-\ sixth.fs - Sixth Native Compiler
-\ Self-hosting: sixth sixth.fs sixth.fs → native sixth compiler
-\ Then: ./sixth program.fs → native program
-\
-\ OPTIMIZATIONS IN THIS FILE (do not remove without understanding):
-\
-\   1. CONSTANT FOLDING - Evaluate literal arithmetic at compile time.
-\      e.g. 3 7 + compiles as push 10 (zero instructions wasted).
-\      Impl: ct-stack, ct-push/ct-pop/ct-flush, fold paths in compile-builtin.
-\      Tests: 1000-1015, 1027-1029, 1035-1037, 1042, 1044-1046, 1049
-\
-\   2. LITERAL-OP FUSION - Fuse literal with runtime arithmetic into one x86 insn.
-\      e.g. runtime_val 3 * emits imul rax,rax,3 instead of push+load+mul+pop.
-\      Impl: gen-add-imm, gen-sub-imm, gen-mul-imm, gen-and-imm, gen-or-imm,
-\            gen-xor-imm, fuse paths (ct-depth=1) in compile-builtin.
-\      Tests: 1016-1021, 1034, 1043, 1047
-\
-\   3. DOUBLE PASS - Scan source first to build word-info table, then compile.
-\      Resolves forward references with correct nargs instead of guessing 1.
-\      Impl: scan-all, info-buf, info-find, scan-stack-comment, scan-body-io.
-\      Tests: 1030-1033, 1048
-\
-\   4. DEAD CODE ELIMINATION - Pure void words called for side effects are tracked.
-\      Impl: has-io, is-void, pending-call, pending-pure, dict-flags encoding.
-\
-\   5. TAIL-CALL OPTIMIZATION - recurse at end of definition becomes jmp.
-\      Impl: tail-recurse variable, patch in end-def.
-\
-\   6. REGISTER-BASED STACK - stack-depth tracks TOS in rax/rbx/rcx/memory.
-\      Avoids memory traffic for shallow stacks (depth <= 3).
-\
-\   7. SWAP ABSORPTION - Deferred swap cancels or absorbs into next op.
-\      swap swap → nop. swap 1+ → inc rbx (operate on NOS, keep swapped).
-\      Same for 1- (dec rbx), negate (neg rbx). Binary ops (+, -, etc.)
-\      absorb swap by clearing swap-pending (operands are commutative in regs).
-\      Impl: swap-pending variable, swap toggle in compile-builtin $swap,
-\            rbx opcodes in $1+/$1-/$negate handlers, flush-cmp calls in
-\            all binary/unary op handlers to flush dup-pending before absorbing.
-\      CRITICAL: swap-pending stays SET after absorbing into 1+/1-/negate.
-\      The registers are still logically swapped. Only a second swap clears it.
-\
-\   8. PEEPHOLE: DUP+CMP+WHILE/UNTIL FUSION - Fuses dup 0> while into one branch.
-\      dup 0> while → test rax,rax; jle forward (3+6=9 bytes, no dup/cmp overhead).
-\      Works for 0=, 0>, 0<. Skips test if last insn was dec/inc (flags already set).
-\      dup without following cmp is preserved (emitted in non-fused path).
-\      Impl: dup-pending, cmp-pending variables. flush-cmp emits deferred dup+cmp.
-\            $dup sets dup-pending. $0>/$0=/$0< save dup-pending into cmp-pending.
-\            $while/$until save both, take fused path if cmp-pending != 0.
-\            gen-while-fused, gen-until-fused: emit condition + forward/backward jmp.
-\            last-sets-flags?: detects dec/inc rax, skips redundant test rax,rax.
-\      CRITICAL: while/until save dup-pending BEFORE flush-swap clears it.
-\      Non-fused path must emit gen-dup if dup was pending (dup while without cmp).
-\      Tests: 325-gcd, 861-peep-while-count, 950-multi-while-seq, 990-sum-1to100
-\
-\   9. WHILE/REPEAT FUSION + LOOP ELIMINATION - Three levels of optimization:
-\      a) BACKWARD FUSION: adjacent while+repeat (no body between them) fuses
-\         forward-jcc + jmp-backward into single backward-jcc. Inverts condition
-\         byte (XOR 1: jle→jg, jnz→jz, jns→js). Saves 5 bytes + 1 branch/iter.
-\      b) COUNTDOWN ELIMINATION: begin 1- dup 0> while repeat → xor eax,eax.
-\         Recognizes 3-byte body (48 ff c8 = dec rax) as pure countdown-to-zero.
-\      c) NOS++ ELIMINATION: begin swap 1+ swap 1- dup 0> while repeat
-\         → add rbx,rax; xor eax,eax. Recognizes 6-byte body
-\         (48 ff c3 48 ff c8 = inc rbx; dec rax) as accumulate+countdown.
-\      Impl: gen-repeat checks code-here == orig (adjacent), then body-size
-\            and byte patterns. Uses dup code-buf + >r / r@ for byte reads.
-\      Result: arith-std 228ms→1ms, loop-std 222ms→1ms. Matches gcc -O2.
-\      CRITICAL: byte reads use (dup code-buf +), NOT (code-buf dup +).
-\      Stack is (orig dest). dup copies dest (TOS). over copies orig (wrong).
-
-\ ============================================================
-\ MISSING WORDS
-\ >= <= missing from interpreter, now in lib/core.fs
-\ <> exists in interpreter but redefined for clarity
-\ ============================================================
+\ sixth.fs - Forth to x86-64 native compiler
+\ Stack: TOS=rax, NOS=rbx, 3rd=rcx, rest=memory at [r15]
+\ Registers: r15=data stack, rbp=return stack, r12/r13=DO/LOOP
+\ See ENCODING.md for full documentation
 
 : >= ( a b -- flag ) < 0= ;
 : <= ( a b -- flag ) > 0= ;
@@ -169,7 +99,6 @@ variable arg-count    1 arg-count !     \ number of input arguments (from stack 
 
 \ Pending call elimination
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
-variable pending-pure   0 pending-pure !   \ 1 if pending call is pure void
 variable do-depth       0 do-depth !       \ nesting depth of do/loop (for exit cleanup)
 create do-trip 8 cells allot              \ known trip count per nesting level (-1=unknown)
 create do-origin 8 cells allot            \ code-here before gen-do emitted anything
@@ -676,7 +605,6 @@ variable fixup-target  0 fixup-target !
 : gen-1- ( -- )  $48 c, $ff c, $c8 c, ;
 : gen-nos+ ( -- )  $48 c, $ff c, $c3 c, ;
 
-variable nos+-pending  0 nos+-pending !
 variable swap-pending  0 swap-pending !
 
 \ OPTIMIZATION 8: dup + comparison + while/until fusion (see header)
@@ -1477,7 +1405,6 @@ variable start-jmp
   $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )
-  ." PATCH-START: target=" code-here . ." from=" start-jmp @ . cr
   code-here start-jmp @ patch-rel32 ;
 
 : gen-epilogue ( -- )
@@ -2781,10 +2708,6 @@ variable num-neg
 \ ============================================================
 \ COMPILER
 \ ============================================================
-
-variable current-def  0 current-def !
-
-\ ============================================================
 \ WORD INFO TABLE (for double-pass forward reference resolution)
 \ ============================================================
 \ OPTIMIZATION 3: DOUBLE PASS infrastructure.
@@ -2997,7 +2920,6 @@ variable ret-count 1 ret-count !
 
 : start-def ( addr u -- )
   0 ct-depth !
-  ." DEF: " 2dup type ."  code-here=" code-here . cr
   dict-add
   code-here current-word-addr !
   0 has-io !
@@ -3148,9 +3070,7 @@ variable ret-count 1 ret-count !
 
   \ Set xt = $400000 + 176 + code-offset
   over 24 + @ $FFFFFFFF and        \ code offset (4 bytes, masked)
-  ." ENTRY: offset=" dup .
   $400000 176 + +                  \ absolute code address
-  ." xt=" dup . cr
   $48 c, $bf c, q,                 \ mov rdi, xt
   $48 c, $89 c, $3c c, $25 c, dup 24 + d,  \ mov [rt-entry+24], rdi
 
@@ -3192,18 +3112,12 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 14584 + data-here !
-  ." BEFORE PROLOGUE: code-here=" code-here . cr
+  DATA-BASE 14592 + data-here !
   gen-prologue
-  ." AFTER PROLOGUE: code-here=" code-here . cr
   emit-rt-parse
-  ." AFTER RT-PARSE: code-here=" code-here . cr
   emit-rt-find
-  ." AFTER RT-FIND: code-here=" code-here . cr
   compile-all
-  ." BEFORE PATCH-START: code-here=" code-here . cr
   patch-start
-  ." AFTER-PATCH: code-here=" code-here . cr
   \ Reset compiler state for startup code
   0 stack-depth !  0 ct-depth !
   0 swap-pending !  0 dup-pending !  0 cmp-pending !
@@ -3214,7 +3128,6 @@ variable ret-count 1 ret-count !
   $48 c, $c7 c, $04 c, $25 c, rt-source-len d, 0 d, \ mov qword [rt-source-len], 0
   $48 c, $bf c, rt-source-buf q,                    \ mov rdi, rt-source-buf
   $48 c, $89 c, $3c c, $25 c, rt-source-addr d,     \ mov [rt-source-addr], rdi
-  ." AFTER-INIT: code-here=" code-here . cr
   \ Emit data initializations from , and c,
   init-count @ 0 ?do
     i init-entry >r
@@ -3228,15 +3141,11 @@ variable ret-count 1 ret-count !
     then
     r> drop
   loop
-  ." AFTER-DATA-INIT: code-here=" code-here . cr
-  \ Initialize runtime dictionary for FIND
   emit-dict-init
-  ." AFTER-DICT-INIT: code-here=" code-here . cr
   $main dict-find
   ?dup if
     0 call-nargs !  0 call-rets !
     dict-addr @ $FFFFFFFF and
-    ." GEN-CALL: target=" dup . ." at=" code-here . cr
     gen-call
   then
   gen-cr
