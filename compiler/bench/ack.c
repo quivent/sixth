@@ -1,4 +1,4 @@
-// expected: 8189
+// Ackermann benchmark: ack(3,10)=8189, ack(4,1)=65533
 #include <stdio.h>
 long ack(long m, long n) {
     if (m == 0) return n + 1;
@@ -7,5 +7,6 @@ long ack(long m, long n) {
 }
 int main() {
     printf("%ld\n", ack(3, 10));
+    printf("%ld\n", ack(4, 1));
     return 0;
 }

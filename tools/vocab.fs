@@ -161,6 +161,11 @@ s" max"     vset-name CAT-ARITH vset-cat 1 vset-comp 30 vset-freq s" ( a b -- ma
 s" 1+"      vset-name CAT-ARITH vset-cat 1 vset-comp 85 vset-freq s" ( n -- n+1 )" vset-effect s" Increment" vset-desc vnext
 s" 1-"      vset-name CAT-ARITH vset-cat 1 vset-comp 75 vset-freq s" ( n -- n-1 )" vset-effect s" Decrement" vset-desc vnext
 s" */"      vset-name CAT-ARITH vset-cat 0 vset-comp 5 vset-freq s" ( a b c -- a*b/c )" vset-effect s" Scale" vset-desc vnext
+s" */mod"   vset-name CAT-ARITH vset-cat 0 vset-comp 5 vset-freq s" ( a b c -- r q )" vset-effect s" Scale with remainder" vset-desc vnext
+s" 2+"      vset-name CAT-ARITH vset-cat 0 vset-comp 20 vset-freq s" ( n -- n+2 )" vset-effect s" Add two" vset-desc vnext
+s" 2-"      vset-name CAT-ARITH vset-cat 0 vset-comp 15 vset-freq s" ( n -- n-2 )" vset-effect s" Subtract two" vset-desc vnext
+s" 2*"      vset-name CAT-ARITH vset-cat 0 vset-comp 25 vset-freq s" ( n -- n*2 )" vset-effect s" Double" vset-desc vnext
+s" 2/"      vset-name CAT-ARITH vset-cat 0 vset-comp 20 vset-freq s" ( n -- n/2 )" vset-effect s" Halve" vset-desc vnext
 
 \ --- Comparison ---
 s" ="   vset-name CAT-CMP vset-cat 1 vset-comp 75 vset-freq s" ( a b -- flag )" vset-effect s" Equal" vset-desc vnext
@@ -171,6 +176,11 @@ s" u<"  vset-name CAT-CMP vset-cat 0 vset-comp 10 vset-freq s" ( a b -- flag )" 
 s" 0="  vset-name CAT-CMP vset-cat 1 vset-comp 60 vset-freq s" ( n -- flag )" vset-effect s" Equal to zero" vset-desc vnext
 s" 0<"  vset-name CAT-CMP vset-cat 1 vset-comp 25 vset-freq s" ( n -- flag )" vset-effect s" Less than zero" vset-desc vnext
 s" 0>"  vset-name CAT-CMP vset-cat 1 vset-comp 20 vset-freq s" ( n -- flag )" vset-effect s" Greater than zero" vset-desc vnext
+s" 0<>" vset-name CAT-CMP vset-cat 0 vset-comp 15 vset-freq s" ( n -- flag )" vset-effect s" Not zero" vset-desc vnext
+s" <="  vset-name CAT-CMP vset-cat 0 vset-comp 25 vset-freq s" ( a b -- flag )" vset-effect s" Less or equal" vset-desc vnext
+s" >="  vset-name CAT-CMP vset-cat 0 vset-comp 25 vset-freq s" ( a b -- flag )" vset-effect s" Greater or equal" vset-desc vnext
+s" u>"  vset-name CAT-CMP vset-cat 0 vset-comp 5 vset-freq s" ( a b -- flag )" vset-effect s" Unsigned greater" vset-desc vnext
+s" within" vset-name CAT-CMP vset-cat 0 vset-comp 15 vset-freq s" ( n lo hi -- flag )" vset-effect s" In range [lo,hi)" vset-desc vnext
 
 \ --- Logic/Bitwise ---
 s" and"    vset-name CAT-LOGIC vset-cat 1 vset-comp 50 vset-freq s" ( a b -- a&b )" vset-effect s" Bitwise AND" vset-desc vnext
@@ -196,6 +206,8 @@ s" move"    vset-name CAT-MEM vset-cat 0 vset-comp 25 vset-freq s" ( src dst u -
 s" fill"    vset-name CAT-MEM vset-cat 0 vset-comp 15 vset-freq s" ( addr u c -- )" vset-effect s" Fill memory" vset-desc vnext
 s" /string" vset-name CAT-MEM vset-cat 0 vset-comp 15 vset-freq s" ( a u n -- a+n u-n)" vset-effect s" Advance string" vset-desc vnext
 s" count"   vset-name CAT-MEM vset-cat 0 vset-comp 10 vset-freq s" ( a -- a+1 u )" vset-effect s" Counted string" vset-desc vnext
+s" variable" vset-name CAT-MEM vset-cat 0 vset-comp 30 vset-freq s" ( -- )" vset-effect s" Create variable" vset-desc vnext
+s" constant" vset-name CAT-MEM vset-cat 0 vset-comp 35 vset-freq s" ( n -- )" vset-effect s" Create constant" vset-desc vnext
 
 \ --- Compiler/Meta ---
 s" :"         vset-name CAT-META vset-cat 0 vset-comp 95 vset-freq s" ( -- )" vset-effect s" Begin definition" vset-desc vnext
@@ -237,6 +249,8 @@ s" of"      vset-name CAT-CTRL vset-cat 0 vset-comp 25 vset-freq s" ( x1 x2 -- )
 s" endof"   vset-name CAT-CTRL vset-cat 0 vset-comp 25 vset-freq s" ( -- )" vset-effect s" End case branch" vset-desc vnext
 s" endcase" vset-name CAT-CTRL vset-cat 0 vset-comp 25 vset-freq s" ( x -- )" vset-effect s" End case" vset-desc vnext
 s" exit"    vset-name CAT-CTRL vset-cat 1 vset-comp 40 vset-freq s" ( -- )" vset-effect s" Return from word" vset-desc vnext
+s" leave"   vset-name CAT-CTRL vset-cat 0 vset-comp 20 vset-freq s" ( -- )" vset-effect s" Exit do loop" vset-desc vnext
+s" recursive" vset-name CAT-CTRL vset-cat 0 vset-comp 10 vset-freq s" ( -- )" vset-effect s" Allow recursion" vset-desc vnext
 
 \ --- Strings ---
 s\" s\""      vset-name CAT-STR vset-cat 1 vset-comp 85 vset-freq s" ( -- addr u )" vset-effect s" String literal" vset-desc vnext
@@ -246,6 +260,12 @@ s" [char]"    vset-name CAT-STR vset-cat 0 vset-comp 30 vset-freq s" ( -- c )" v
 s" char"      vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( -- c )" vset-effect s" Parse char" vset-desc vnext
 s" parse-name" vset-name CAT-STR vset-cat 0 vset-comp 5 vset-freq s" ( -- addr u )" vset-effect s" Parse next word" vset-desc vnext
 s\" abort\""  vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( flag -- )" vset-effect s" Conditional abort" vset-desc vnext
+s" source"  vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( -- addr u )" vset-effect s" Input buffer" vset-desc vnext
+s" >in"     vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( -- addr )" vset-effect s" Input offset var" vset-desc vnext
+s" parse"   vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( c -- addr u )" vset-effect s" Parse to delimiter" vset-desc vnext
+s" word"    vset-name CAT-STR vset-cat 0 vset-comp 5 vset-freq s" ( c -- addr )" vset-effect s" Parse word" vset-desc vnext
+s" char+"   vset-name CAT-STR vset-cat 0 vset-comp 10 vset-freq s" ( a -- a+1 )" vset-effect s" Next char address" vset-desc vnext
+s" chars"   vset-name CAT-STR vset-cat 0 vset-comp 5 vset-freq s" ( n -- n )" vset-effect s" Chars to bytes" vset-desc vnext
 
 \ --- I/O ---
 s" ."      vset-name CAT-IO vset-cat 1 vset-comp 80 vset-freq s" ( n -- )" vset-effect s" Print number" vset-desc vnext
@@ -266,6 +286,18 @@ s" #s"   vset-name CAT-NUM vset-cat 0 vset-comp 15 vset-freq s" ( n -- 0 )" vset
 s" #>"   vset-name CAT-NUM vset-cat 0 vset-comp 15 vset-freq s" ( n -- addr u )" vset-effect s" End PNO" vset-desc vnext
 s" hold" vset-name CAT-NUM vset-cat 0 vset-comp 5 vset-freq s" ( c -- )" vset-effect s" Insert char in PNO" vset-desc vnext
 s" sign" vset-name CAT-NUM vset-cat 0 vset-comp 5 vset-freq s" ( n -- )" vset-effect s" Conditional minus" vset-desc vnext
+s" base"    vset-name CAT-NUM vset-cat 0 vset-comp 15 vset-freq s" ( -- addr )" vset-effect s" Number base var" vset-desc vnext
+s" decimal" vset-name CAT-NUM vset-cat 0 vset-comp 10 vset-freq s" ( -- )" vset-effect s" Set base 10" vset-desc vnext
+
+\ --- Double Precision ---
+s" s>d"    vset-name CAT-ARITH vset-cat 0 vset-comp 15 vset-freq s" ( n -- d )" vset-effect s" Single to double" vset-desc vnext
+s" d+"     vset-name CAT-ARITH vset-cat 0 vset-comp 10 vset-freq s" ( d1 d2 -- d )" vset-effect s" Double add" vset-desc vnext
+s" d-"     vset-name CAT-ARITH vset-cat 0 vset-comp 10 vset-freq s" ( d1 d2 -- d )" vset-effect s" Double subtract" vset-desc vnext
+s" um*"    vset-name CAT-ARITH vset-cat 0 vset-comp 10 vset-freq s" ( u1 u2 -- ud )" vset-effect s" Unsigned multiply" vset-desc vnext
+s" m*"     vset-name CAT-ARITH vset-cat 0 vset-comp 10 vset-freq s" ( n1 n2 -- d )" vset-effect s" Signed multiply" vset-desc vnext
+s" um/mod" vset-name CAT-ARITH vset-cat 0 vset-comp 10 vset-freq s" ( ud u -- r q )" vset-effect s" Unsigned div/mod" vset-desc vnext
+s" sm/rem" vset-name CAT-ARITH vset-cat 0 vset-comp 5 vset-freq s" ( d n -- r q )" vset-effect s" Symmetric div/mod" vset-desc vnext
+s" fm/mod" vset-name CAT-ARITH vset-cat 0 vset-comp 5 vset-freq s" ( d n -- r q )" vset-effect s" Floored div/mod" vset-desc vnext
 
 \ --- Misc ---
 s" noop"  vset-name CAT-MISC vset-cat 0 vset-comp 5 vset-freq s" ( -- )" vset-effect s" No operation" vset-desc vnext
@@ -293,3 +325,70 @@ s" >number"   vset-name CAT-MISC vset-cat 0 vset-comp 5 vset-freq s" ( ud a u--u
   0 vocab-count @ 0 ?do
     over i vcat = i vcomp and if 1+ then
   loop nip ;
+
+\ ============================================================
+\ AUTOMATIC COMPILED DETECTION
+\ ============================================================
+\ Scans compiler/sixth.fs to detect which words are actually
+\ compiled. Runs at load time. Overwrites hardcoded values.
+
+create scan-buf 8192 allot
+variable scan-len
+
+\ Reset all compiled flags to 0
+: reset-compiled ( -- )
+  vocab-count @ 0 ?do
+    0 i vocab-entry VF-COMP + c!
+  loop ;
+
+\ Find word in vocab by name, return index or -1
+: find-vocab-word ( addr u -- n | -1 )
+  vocab-count @ 0 ?do
+    2dup i vname str= if
+      2drop i unloop exit
+    then
+  loop
+  2drop -1 ;
+
+\ Mark a word as compiled by name
+: mark-compiled ( addr u -- )
+  find-vocab-word dup -1 <> if
+    vocab-entry VF-COMP + 1 swap c!
+  else drop then ;
+
+\ Parse newline-separated word list
+variable _line-start
+variable _line-len
+
+: parse-word-list ( addr u -- )
+  over _line-start !
+  0 _line-len !
+  begin dup 0> while
+    over c@ 10 = if
+      _line-start @ _line-len @
+      dup 0> if mark-compiled else 2drop then
+      over 1+ _line-start !
+      0 _line-len !
+    else
+      1 _line-len +!
+    then
+    1- swap 1+ swap
+  repeat
+  _line-len @ 0> if
+    _line-start @ _line-len @ mark-compiled
+  then
+  2drop ;
+
+\ Scan sixth.fs for compiled words
+: scan-sixth ( -- )
+  reset-compiled
+  s" grep 'str= if' compiler/sixth.fs 2>/dev/null | grep -o '\$[^ ]* str=' | sed 's/^\$//;s/ str=$//' | sort -u > /tmp/fifth-scan.txt" system
+  s" /tmp/fifth-scan.txt" slurp-file   ( addr u )
+  dup 0= if 2drop exit then
+  dup 8191 > if drop 8191 then         ( addr u' )
+  dup scan-len !                       ( addr u' )
+  scan-buf swap move                   ( )
+  scan-buf scan-len @ parse-word-list ;
+
+\ Run at load time
+scan-sixth
