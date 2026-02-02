@@ -1,6 +1,6 @@
 \ expected: 102334155
 
-: fib ( n -- f )
+: fib ( n -- f ) recursive
   dup 2 < if exit then
   dup 1 - recurse
   swap 2 - recurse

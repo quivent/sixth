@@ -109,12 +109,22 @@ $800000 constant DATA-BASE    \ In separate data segment (was $40A000 in code)
 \   +0:   base variable (8 bytes, initialized to 10)
 \   +8:   pno-pos variable (8 bytes)
 \   +16:  pno-buf (128 bytes)
-\   +144: user data starts here
+\   +144: source-buf (4096 bytes, input buffer)
+\   +4240: >in variable (8 bytes, parse position)
+\   +4248: source-len (8 bytes, input length)
+\   +4256: word-buf (64 bytes, WORD result)
+\   +4320: user data starts here
 DATA-BASE constant rt-base         \ runtime address of base variable
 DATA-BASE 8 + constant rt-pno-pos  \ runtime address of pno position
 DATA-BASE 16 + constant rt-pno-buf \ runtime address of PNO buffer (128 bytes)
 128 constant PNO-SIZE
-variable data-here  DATA-BASE 144 + data-here !
+DATA-BASE 144 + constant rt-source-buf   \ runtime address of input buffer
+4096 constant SOURCE-SIZE
+DATA-BASE 4240 + constant rt->in         \ runtime address of >in
+DATA-BASE 4248 + constant rt-source-len  \ runtime address of source length
+DATA-BASE 4256 + constant rt-word-buf    \ runtime address of WORD buffer
+64 constant WORD-SIZE
+variable data-here  DATA-BASE 4320 + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -1704,6 +1714,72 @@ variable start-jmp
   $48 c, $2b c, $04 c, $25 c, rt-pno-pos d, ; \ sub rax, [rt-pno-pos] (TOS=len)
 
 \ ============================================================
+\ INPUT PARSING
+\ ============================================================
+\ Runtime: source-buf(4096), >in(8), source-len(8), word-buf(64) at DATA-BASE+144
+
+: gen-source ( -- )
+  \ ( -- addr u ) push input buffer address and length
+  push-tos
+  $48 c, $b8 c, rt-source-buf q,              \ mov rax, rt-source-buf (addr)
+  push-tos
+  $48 c, $8b c, $04 c, $25 c, rt-source-len d, ; \ mov rax, [rt-source-len] (len)
+
+: gen->in ( -- )
+  \ ( -- addr ) push address of >in variable
+  push-tos
+  $48 c, $b8 c, rt->in q, ;                   \ mov rax, rt->in
+
+: gen-parse ( -- )
+  \ ( char -- addr u ) parse from >in to delimiter
+  \ rax = delimiter char. Result: rbx=addr, rax=len
+  \ Uses: rsi=source-buf, rdi=>in, rdx=source-len, r8=start
+  $48 c, $89 c, $c7 c,                        \ mov rdi, rax (save delim in rdi)
+  $48 c, $8b c, $34 c, $25 c, rt->in d,       \ mov rsi, [rt->in]
+  $48 c, $8b c, $14 c, $25 c, rt-source-len d, \ mov rdx, [rt-source-len]
+  $49 c, $89 c, $f0 c,                        \ mov r8, rsi (start = >in)
+  \ Loop: find delimiter or end
+  code-here                                    \ loop target
+  $48 c, $39 c, $d6 c,                        \ cmp rsi, rdx
+  $7d c, 0 c, code-here >r                    \ jge done (patch later)
+  $48 c, $b8 c, rt-source-buf q,              \ mov rax, rt-source-buf
+  $0f c, $b6 c, $04 c, $30 c,                 \ movzx eax, byte [rax+rsi]
+  $48 c, $39 c, $f8 c,                        \ cmp rax, rdi (delim?)
+  $74 c, 0 c, code-here >r                    \ je found (patch later)
+  $48 c, $ff c, $c6 c,                        \ inc rsi
+  $eb c, dup code-here - 1- c, drop           \ jmp back (rel8)
+  \ found: skip delimiter
+  code-here r@ - r> 1- code-buf + c!          \ patch je found (relative)
+  $48 c, $ff c, $c6 c,                        \ inc rsi (skip delim)
+  \ done: calculate result
+  code-here r@ - r> 1- code-buf + c!          \ patch jge done (relative)
+  $48 c, $89 c, $34 c, $25 c, rt->in d,       \ mov [rt->in], rsi (update >in)
+  $4c c, $89 c, $c3 c,                        \ mov rbx, r8 (start → NOS)
+  $48 c, $81 c, $c3 c, rt-source-buf d,       \ add rbx, rt-source-buf (addr)
+  $48 c, $89 c, $f0 c,                        \ mov rax, rsi
+  $4c c, $29 c, $c0 c,                        \ sub rax, r8 (len = >in - start)
+  \ If we skipped delim, len is one less
+  $48 c, $39 c, $d6 c,                        \ cmp rsi, rdx (at end?)
+  $74 c, 3 c,                                 \ je skip_dec
+  $48 c, $ff c, $c8 c,                        \ dec rax (don't count delim)
+  1 stack-depth +! ;                          \ result is 2 cells
+
+: gen-word ( -- )
+  \ ( char -- c-addr ) parse word, return counted string
+  \ Uses gen-parse then copies to word-buf with count
+  gen-parse
+  \ Stack: rbx=addr, rax=len. Copy to word-buf.
+  $48 c, $89 c, $c1 c,                        \ mov rcx, rax (len for rep movsb)
+  $48 c, $89 c, $de c,                        \ mov rsi, rbx (source addr)
+  $48 c, $bf c, rt-word-buf 1+ q,             \ mov rdi, rt-word-buf+1 (dest)
+  $f3 c, $a4 c,                               \ rep movsb
+  \ Store count byte
+  $48 c, $88 c, $04 c, $25 c, rt-word-buf d,  \ mov [rt-word-buf], al
+  \ Return address of counted string (drop NOS, set TOS)
+  $48 c, $b8 c, rt-word-buf q,                \ mov rax, rt-word-buf
+  -1 stack-depth +! ;                         \ result is 1 cell
+
+\ ============================================================
 \ STRING COMPARE
 \ ============================================================
 
@@ -1864,6 +1940,10 @@ s" u<" s, 2constant $u<
 s" :" s, 2constant $:
 s" ;" s, 2constant $;
 s" main" s, 2constant $main
+s" source" s, 2constant $source
+s" >in" s, 2constant $>in
+s" parse" s, 2constant $parse
+s" word" s, 2constant $word
 
 \ ============================================================
 \ TOKENIZER
@@ -2195,6 +2275,11 @@ variable num-neg
   2dup $# str= if 2drop flush-swap ct-flush flush-pending gen-# true exit then
   2dup $#s str= if 2drop flush-swap ct-flush flush-pending gen-#s true exit then
   2dup $#> str= if 2drop flush-swap ct-flush flush-pending gen-#> true exit then
+  \ ---- Input Parsing ----
+  2dup $source str= if 2drop flush-swap ct-flush gen-source true exit then
+  2dup $>in str= if 2drop flush-swap ct-flush gen->in true exit then
+  2dup $parse str= if 2drop flush-swap ct-flush flush-pending gen-parse true exit then
+  2dup $word str= if 2drop flush-swap ct-flush flush-pending gen-word true exit then
   \ ---- Control flow: flush, then normal ----
   2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
   2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then

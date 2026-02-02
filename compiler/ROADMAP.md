@@ -26,6 +26,19 @@ sixth.fs compiles Forth to x86-64 machine code. Single-pass, ~2600 lines of Fort
 **Double-Cell**: `s>d` `um*` `m*` `um/mod` `sm/rem` `fm/mod` `d+` `d-`
 **Custom**: `nos+` `nos-` `tuck+` `dup+` `dup-` `<if` `1-nzloop` `dup2` `0<if` `0=if` `0<>if`
 
+### Reference Benchmark: Ackermann
+
+**ack.fs is the source of truth.** If ack fails, investigate:
+1. Is it an optimization bug? Disable optimizations to isolate.
+2. Is it a code generation bug? Compare with gcc -O2 output.
+
+Do not modify ack.fs to make it pass. Fix the compiler.
+
+```bash
+./sixth compiler/sixth.fs compiler/bench/ack.fs /tmp/ack && /tmp/ack
+# Expected: 8189
+```
+
 ### Per-Optimization Anchors (sustain these)
 
 | Optimization | Key Test | sixth/gcc-O2 | Floor |
@@ -109,14 +122,16 @@ Pattern match on literals. Emit faster instructions.
 
 ## Step 3: Run Benchmarks (DONE)
 
+```bash
+./sixth compiler/bench/run.fs
+```
+
 | Benchmark | Sixth | GCC -O2 | Ratio |
 |-----------|-------|---------|-------|
 | ack(3,10) | 53ms | 12ms | 4.4x slower |
 | primes(10000) | 23ms | 14ms | 1.6x slower |
 
 Sixth compiles instant. GCC compiles in 30ms. Binaries 12-26x smaller.
-
-See BENCHMARKS.md for details.
 
 ---
 

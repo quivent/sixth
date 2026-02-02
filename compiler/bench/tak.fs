@@ -1,6 +1,6 @@
 \ expected: 7
 
-: tak ( x y z -- result )
+: tak ( x y z -- result ) recursive
   over 2 pick > if
     2 pick 1- 2 pick 2 pick recurse
     3 pick 1- 3 pick 5 pick recurse
