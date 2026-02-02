@@ -133,8 +133,9 @@ DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
 256 constant RT-DICT-MAX
 DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
 DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
+DATA-BASE 14584 + constant rt-last-create \ address of last CREATE'd word's code
 
-variable data-here  DATA-BASE 14584 + data-here !
+variable data-here  DATA-BASE 14592 + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -153,6 +154,8 @@ variable interp-val  0 interp-val !
 variable rt-find-addr  0 rt-find-addr !  \ Runtime FIND function address
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 variable full-source  0 full-source !  \ 0=fast (direct rt-source-buf), 1=full (indirect rt-source-addr)
+variable last-create-code  0 last-create-code !  \ code-pos of last CREATE (for DOES>)
+variable last-create-dict  0 last-create-dict !  \ dict index of last CREATE (for DOES>)
 
 \ OPTIMIZATION 6: REGISTER-BASED STACK
 \ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
@@ -2297,6 +2300,7 @@ s" [" s, 2constant $[
 s" ]" s, 2constant $]
 s" literal" s, 2constant $literal
 s" postpone" s, 2constant $postpone
+s" does>" s, 2constant $does>
 s" interpret" s, 2constant $interpret
 s" evaluate" s, 2constant $evaluate
 s" quit" s, 2constant $quit
@@ -2380,6 +2384,8 @@ variable token-len
 
 : gen->body ( -- )  \ ( xt -- addr ) extract data addr from CREATE'd word
   $48 c, $8b c, $40 c, 2 c, ;  \ mov rax, [rax+2]
+
+\ gen-postpone is inlined in compile-builtin (needs to call compile-builtin)
 
 \ ============================================================
 \ NUMBER PARSER
@@ -2666,6 +2672,16 @@ variable num-neg
   2dup $find str= if 2drop flush-swap ct-flush flush-pending gen-find true exit then
   2dup $execute str= if 2drop flush-swap ct-flush flush-pending gen-execute true exit then
   2dup $' str= if 2drop flush-swap ct-flush flush-pending gen-' true exit then
+  2dup $postpone str= if
+    2drop flush-swap ct-flush flush-pending
+    get-token dict-find ?dup if
+      dup dict-flags @ dup 3 rshift $F and call-nargs !
+                          7 rshift $F and call-rets !
+      dict-addr @ $FFFFFFFF and
+      gen-call
+    else ." POSTPONE: word not in dictionary (builtins not yet supported)" cr 1 throw then
+    true exit
+  then
   2dup $>body str= if 2drop flush-swap ct-flush flush-pending gen->body true exit then
   2dup $interpret str= if 2drop flush-swap ct-flush gen-interpret true exit then
   2dup $evaluate str= if 2drop flush-swap ct-flush flush-pending gen-evaluate true exit then
@@ -2674,6 +2690,30 @@ variable num-neg
   2dup $[ str= if 2drop flush-swap ct-flush 0 state ! true exit then
   2dup $] str= if 2drop 1 state ! true exit then
   2dup $literal str= if 2drop interp-val @ ct-push true exit then
+  2dup $does> str= if
+    2drop flush-swap ct-flush flush-pending
+    \ NOTE: DOES> only works with direct CREATE usage, not inside defining words.
+    \ Our CREATE parses at compile-time, so `: constant create , does> @ ;` fails.
+    \ Use the builtin CONSTANT/VARIABLE words instead.
+    last-create-code @ ?dup 0= if
+      ." DOES> without CREATE" cr 1 throw
+    then
+    dup 10 + code-buf + $e9 swap c!            \ ret -> jmp
+    code-here swap - 15 -                      \ offset (32-bit)
+    last-create-code @ 11 + code-buf +         \ patch address ( offset addr )
+    over $FF and over c!                       \ byte 0
+    swap 8 rshift swap
+    over $FF and over 1+ c!                    \ byte 1
+    swap 8 rshift swap
+    over $FF and over 2 + c!                   \ byte 2
+    swap 8 rshift swap
+    3 + c!                                     \ byte 3
+    \ Clear $800 flag so word is called, not inlined
+    last-create-dict @ 32 * dict-buf + 28 +
+    dup @ $800 invert and swap !
+    1 stack-depth !
+    true exit
+  then
   \ ---- Control flow: flush, then normal ----
   2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
   2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
@@ -3025,8 +3065,11 @@ variable ret-count 1 ret-count !
     2drop get-token
     dup 0= if 2drop ." Expected name after create" cr 1 throw then
     dict-add
-    $48 c, $b8 c, data-here @ q,
-    $c3 c,
+    dict-count @ 1- last-create-dict !  \ save dict index for DOES>
+    code-here last-create-code !        \ save code pos for DOES>
+    $48 c, $b8 c, data-here @ q,        \ mov rax, data-addr (10 bytes)
+    $c3 c,                              \ ret (will be patched by DOES>)
+    0 c, 0 c, 0 c, 0 c,                 \ padding for jmp rel32
     5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     exit
   then

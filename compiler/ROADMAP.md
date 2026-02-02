@@ -66,8 +66,8 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 [x] 6.  LITERAL  ( n -- )                 compile literal (immediate)
 [x] 7.  ABORT    ( -- )                   clear stacks, restart
 [x] 8.  QUIT     ( -- )                   main REPL loop (words only, no number parsing)
-[ ] 9.  POSTPONE ( "name" -- )            compile compilation (immediate)
-[ ] 10. DOES>    ( -- )                   set runtime behavior
+[x] 9.  POSTPONE ( "name" -- )            compile compilation (user words only, not builtins)
+[x] 10. DOES>    ( -- )                   set runtime behavior (direct CREATE usage only)
 [x] 11. OPEN-FILE                         syscall wrapper
 [x] 12. READ-FILE                         syscall wrapper
 [ ] 13. READ-LINE                         line-by-line reading
@@ -153,8 +153,8 @@ Goal: Full interactive Forth system. Interprets, compiles, no C.
 | EVALUATE | DONE |
 | ABORT | NOT STARTED |
 | QUIT | NOT STARTED |
-| POSTPONE | NOT STARTED |
-| DOES> | NOT STARTED |
+| POSTPONE | DONE (user words) |
+| DOES> | DONE (direct usage) |
 
 #### Implementation Order
 
