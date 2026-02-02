@@ -58,31 +58,57 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 **What remains, in order:**
 
 ```
-[ ] 1.  '        ( "name" -- xt )         parse and find
-[ ] 2.  [']      ( "name" -- )            compile xt as literal
-[ ] 3.  >BODY    ( xt -- addr )           get data field
-[ ] 4.  [        ( -- )                   switch to interpret mode (immediate)
-[ ] 5.  ]        ( -- )                   switch to compile mode
-[ ] 6.  LITERAL  ( n -- )                 compile literal (immediate)
-[ ] 7.  ABORT    ( -- )                   clear stacks, restart
-[ ] 8.  QUIT     ( -- )                   main REPL loop
+[x] 1.  '        ( "name" -- xt )         parse and find
+[x] 2.  [']      ( "name" -- )            compile xt as literal (use: ' word)
+[x] 3.  >BODY    ( xt -- addr )           get data field
+[x] 4.  [        ( -- )                   switch to interpret mode (immediate)
+[x] 5.  ]        ( -- )                   switch to compile mode
+[x] 6.  LITERAL  ( n -- )                 compile literal (immediate)
+[x] 7.  ABORT    ( -- )                   clear stacks, restart
+[x] 8.  QUIT     ( -- )                   main REPL loop (words only, no number parsing)
 [ ] 9.  POSTPONE ( "name" -- )            compile compilation (immediate)
 [ ] 10. DOES>    ( -- )                   set runtime behavior
-[ ] 11. OPEN-FILE                         syscall wrapper
-[ ] 12. READ-FILE                         syscall wrapper
+[x] 11. OPEN-FILE                         syscall wrapper
+[x] 12. READ-FILE                         syscall wrapper
 [ ] 13. READ-LINE                         line-by-line reading
 [ ] 14. INCLUDE  ( "name" -- )            load and evaluate file
 ------- SELF-HOSTING COMPLETE -------
 [ ] 15. Delete engine/                    remove C interpreter
 [ ] 16. Forth test framework              replace bash test runner
 ------- SOVEREIGNTY COMPLETE -------
+[ ] 17. CLOCK-MS                          syscall 228 (timing)
+[ ] 18. ARGC ARGV                         command line args
+[ ] 19. GETENV                            environment variables
+[ ] 20. BYE                               syscall 60 (clean exit)
+[ ] 21. THROW CATCH                       exception handling
+------- PRACTICAL COMPLETE -------
 ```
+
+### Missing Syscall Wrappers
+
+Words in interpreter but not native compiler. Required for practical use.
+
+| Word | Syscall | Purpose | Lines |
+|------|---------|---------|-------|
+| `clock-ms` | 228 (clock_gettime) | Timing, benchmarks | ~15 |
+| `argc` `argv` | N/A (kernel passes at startup) | Command line args | ~20 |
+| `getenv` | N/A (parse environ pointer) | Environment variables | ~25 |
+| `bye` | 60 (exit) | Clean exit from REPL | ~5 |
+| `throw` `catch` | N/A (stack manipulation) | Exception handling | ~40 |
+
+**Notes:**
+- `argc`/`argv`: Linux puts these on stack at `[rsp]` and `[rsp+8]` at program start
+- `getenv`: `environ` pointer follows `argv` array (after NULL terminator)
+- `throw`/`catch`: Pure Forth, no syscall. Save/restore return stack.
 
 **Already done:**
 - [x] SOURCE, >IN, PARSE, WORD, ACCEPT, REFILL (Phase 1)
 - [x] FIND, EXECUTE (runtime dictionary lookup)
 - [x] INTERPRET, EVALUATE (interpreter loop core)
 - [x] STATE, CREATE, : ; IMMEDIATE (defining words)
+- [x] ', >BODY, [, ], LITERAL (Phase 2-3)
+- [x] OPEN-FILE, READ-FILE, WRITE-FILE, CLOSE-FILE, r/o, w/o, r/w (Phase 6)
+- [x] QUIT, ABORT (Phase 5 - REPL loop, words only)
 
 ---
 

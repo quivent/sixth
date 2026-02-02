@@ -1651,6 +1651,120 @@ variable start-jmp
   gen-type ;
 
 \ ============================================================
+\ FILE I/O
+\ ============================================================
+\ Runtime file operations use Linux syscalls directly.
+\ OPEN-FILE needs null-terminated path, so we copy to rt-word-buf.
+
+: gen-r/o ( -- )  push-tos  $31 c, $c0 c, ;  \ 0 = O_RDONLY
+: gen-w/o ( -- )  push-tos  $b8 c, 577 d, ;  \ O_WRONLY|O_CREAT|O_TRUNC = 1|64|512
+: gen-r/w ( -- )  push-tos  $b8 c, 2 d, ;    \ 2 = O_RDWR
+
+: gen-open-file ( -- )
+  \ ( addr u fam -- fileid ior )
+  \ fam=rax, u=rbx, addr=rcx or [r15]
+  \ Uses rt-word-buf as temp buffer for null-terminated path
+  1 has-io !
+  \ Save registers
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
+  else
+    $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
+    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
+  then
+  \ rsi=addr, rbx=len, rax=fam
+  \ Copy string to rt-word-buf and null-terminate
+  $50 c,                                    \ push rax (save fam)
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
+  $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
+  $f3 c, $a4 c,                            \ rep movsb (copy string)
+  $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0 (null-terminate)
+  \ Now call open syscall
+  $58 c,                                    \ pop rax (fam -> flags)
+  $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf (path)
+  $ba c, 420 d,                            \ mov edx, 0644 (mode)
+  $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
+  $0f c, $05 c,                            \ syscall
+  \ rax = fd (>=0) or -errno (<0)
+  \ Convert to fileid + ior
+  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save fd)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0 = success)
+  $48 c, $85 c, $db c,                     \ test rbx, rbx
+  $79 c, 6 c,                              \ jns +6 (skip if fd >= 0)
+  $48 c, $31 c, $db c,                     \ xor rbx, rbx (fileid = 0 on error)
+  $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1 on error)
+  \ Stack result: rbx=fileid, rax=ior
+  \ Consumed 3 (addr u fam), produced 2 (fileid ior) = net -1
+  -1 stack-depth +!
+  ;
+
+: gen-close-file ( -- )
+  \ ( fileid -- ior )
+  \ fileid=rax
+  1 has-io !
+  $48 c, $89 c, $c7 c,                     \ mov rdi, rax (fd)
+  $b8 c, 3 d,                              \ mov eax, 3 (sys_close)
+  $0f c, $05 c,                            \ syscall
+  \ rax = 0 on success, -errno on failure
+  $48 c, $85 c, $c0 c,                     \ test rax, rax
+  $74 c, 7 c,                              \ jz +7 (skip if success)
+  $48 c, $c7 c, $c0 c, -1 d,              \ mov rax, -1
+  ;
+
+: gen-read-file ( -- )
+  \ ( addr u fileid -- u2 ior )
+  \ fileid=rax, u=rbx, addr=rcx or [r15]
+  1 has-io !
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd)
+  else
+    $49 c, $8b c, $37 c,                    \ mov rsi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
+  then
+  \ rsi=addr, rbx=u, rax=fileid
+  $48 c, $89 c, $c7 c,                     \ mov rdi, rax (fd)
+  $48 c, $89 c, $da c,                     \ mov rdx, rbx (count)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (sys_read=0)
+  $0f c, $05 c,                            \ syscall
+  \ rax = bytes read (>=0) or -errno (<0)
+  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save count)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0)
+  $48 c, $85 c, $db c,                     \ test rbx, rbx
+  $79 c, 6 c,                              \ jns +6
+  $48 c, $31 c, $db c,                     \ xor rbx, rbx (u2 = 0 on error)
+  $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1)
+  \ Consumed 3 (addr u fileid), produced 2 (u2 ior) = net -1
+  -1 stack-depth +!
+  ;
+
+: gen-write-file ( -- )
+  \ ( addr u fileid -- ior )
+  \ fileid=rax, u=rbx, addr=rcx or [r15]
+  1 has-io !
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr)
+  else
+    $49 c, $8b c, $37 c,                    \ mov rsi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
+  then
+  $48 c, $89 c, $c7 c,                     \ mov rdi, rax (fd)
+  $48 c, $89 c, $da c,                     \ mov rdx, rbx (count)
+  $b8 c, 1 d,                              \ mov eax, 1 (sys_write)
+  $0f c, $05 c,                            \ syscall
+  \ rax = bytes written (>=0) or -errno (<0)
+  \ Return 0 for success, -1 for error
+  $48 c, $85 c, $c0 c,                     \ test rax, rax
+  $78 c, 5 c,                              \ js +5 (jump if error)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (success = 0)
+  $eb c, 7 c,                              \ jmp +7 (skip error path)
+  $48 c, $c7 c, $c0 c, -1 d,              \ mov rax, -1 (error)
+  -2 stack-depth +!
+  ;
+
+\ READ-LINE not needed - INCLUDE will slurp whole file and EVALUATE
+
+\ ============================================================
 \ PICTURED NUMERIC OUTPUT
 \ ============================================================
 \ Runtime layout: rt-base(8), rt-pno-pos(8), rt-pno-buf(128) at DATA-BASE
@@ -1988,6 +2102,26 @@ variable rt-parse-addr  0 rt-parse-addr !
   $48 c, $89 c, $3c c, $25 c, rt-source-addr d,  \ mov [rt-source-addr], rdi
   -2 stack-depth +! ;                            \ consumed addr u
 
+: gen-quit ( -- )
+  \ ( -- ) Main REPL loop: begin refill while interpret repeat
+  1 has-io !
+  code-here >r                                   \ R: ( loop )
+  gen-refill                                     \ ( flag )
+  $48 c, $85 c, $c0 c,                          \ test rax, rax
+  $74 c, >mark                                   \ jz done
+  pop-tos                                        \ consume flag
+  gen-interpret-body                             \ interpret
+  $eb c, r@ code-here - 1- c,                   \ jmp loop
+  >resolve                                       \ done:
+  r> drop
+  0 stack-depth ! ;
+
+: gen-abort ( -- )
+  \ ( -- ) Clear stacks, call QUIT
+  \ Reset data stack: r15 = 0x900000 (same as gen-prologue)
+  $49 c, $bf c, $800000 $100000 + q,            \ mov r15, 0x900000
+  gen-quit ;
+
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
@@ -2165,6 +2299,15 @@ s" literal" s, 2constant $literal
 s" postpone" s, 2constant $postpone
 s" interpret" s, 2constant $interpret
 s" evaluate" s, 2constant $evaluate
+s" quit" s, 2constant $quit
+s" abort" s, 2constant $abort
+s" r/o" s, 2constant $r/o
+s" w/o" s, 2constant $w/o
+s" r/w" s, 2constant $r/w
+s" open-file" s, 2constant $open-file
+s" close-file" s, 2constant $close-file
+s" read-file" s, 2constant $read-file
+s" write-file" s, 2constant $write-file
 
 \ ============================================================
 \ TOKENIZER
@@ -2497,6 +2640,14 @@ variable num-neg
   \ ---- Memory operations ----
   2dup $move str= if 2drop flush-swap ct-flush flush-pending gen-move true exit then
   2dup $fill str= if 2drop flush-swap ct-flush flush-pending gen-fill true exit then
+  \ ---- File I/O ----
+  2dup $r/o str= if 2drop flush-swap ct-flush gen-r/o true exit then
+  2dup $w/o str= if 2drop flush-swap ct-flush gen-w/o true exit then
+  2dup $r/w str= if 2drop flush-swap ct-flush gen-r/w true exit then
+  2dup $open-file str= if 2drop flush-swap ct-flush flush-pending gen-open-file true exit then
+  2dup $close-file str= if 2drop flush-swap ct-flush flush-pending gen-close-file true exit then
+  2dup $read-file str= if 2drop flush-swap ct-flush flush-pending gen-read-file true exit then
+  2dup $write-file str= if 2drop flush-swap ct-flush flush-pending gen-write-file true exit then
   \ ---- Pictured Numeric Output ----
   2dup $base str= if 2drop flush-swap ct-flush gen-base true exit then
   2dup $<# str= if 2drop flush-swap ct-flush gen-<# true exit then
@@ -2518,6 +2669,8 @@ variable num-neg
   2dup $>body str= if 2drop flush-swap ct-flush flush-pending gen->body true exit then
   2dup $interpret str= if 2drop flush-swap ct-flush gen-interpret true exit then
   2dup $evaluate str= if 2drop flush-swap ct-flush flush-pending gen-evaluate true exit then
+  2dup $quit str= if 2drop flush-swap ct-flush gen-quit true exit then
+  2dup $abort str= if 2drop flush-swap ct-flush gen-abort true exit then
   2dup $[ str= if 2drop flush-swap ct-flush 0 state ! true exit then
   2dup $] str= if 2drop 1 state ! true exit then
   2dup $literal str= if 2drop interp-val @ ct-push true exit then
