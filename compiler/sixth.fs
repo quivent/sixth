@@ -199,7 +199,7 @@ variable info-count  0 info-count !
   1 e4, 7 e4, 0 e8,
   $400000 e8, $400000 e8,
   120 code-pos @ + e8,
-  $10000 e8,
+  $100000 e8,  \ 1MB memory (was 64KB, caused stack to hit code)
   $1000 e8, ;
 
 : write-elf ( addr u -- )
@@ -1450,8 +1450,8 @@ variable tail-recurse  0 tail-recurse !
 variable start-jmp
 
 : gen-prologue ( -- )
-  $49 c, $bf c, $400000 $8000 + q,
-  $48 c, $bd c, $400000 $F000 + q,
+  $49 c, $bf c, $400000 $80000 + q,   \ r15 = data stack (was $8000, hit code)
+  $48 c, $bd c, $400000 $F0000 + q,   \ rbp = return stack
   $e9 c, code-here start-jmp ! 0 d, ;
 
 : patch-start ( -- )

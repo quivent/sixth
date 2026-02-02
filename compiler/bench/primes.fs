@@ -1,4 +1,4 @@
-\ expected: 900
+\ expected: 9592
 
 : isqrt ( n -- sqrt )
   dup 2 < if exit then
@@ -15,5 +15,4 @@
     2 +
   repeat 2drop drop 1 ;
 
-\ WORKAROUND: >7887 iterations triggers register clobbering bug
-: main 0 7000 2 do i is-prime if 1+ then loop . cr ;
+: main 0 100000 2 do i is-prime if 1+ then loop . cr ;
