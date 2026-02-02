@@ -778,6 +778,13 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
+: gen-0<> ( -- )
+  \ ( n -- flag ) true if n != 0
+  $48 c, $85 c, $c0 c,           \ test rax, rax
+  $0f c, $95 c, $c0 c,           \ setne al
+  $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
+  $48 c, $f7 c, $d8 c, ;        \ neg rax
+
 : gen-min ( -- )
   \ ( a b -- min ) b=rax, a=rbx. cmp rbx,rax; cmovl rax,rbx
   $48 c, $39 c, $c3 c,
@@ -1725,6 +1732,7 @@ s" >=" s, 2constant $>=
 s" 0=" s, 2constant $0=
 s" 0<" s, 2constant $0<
 s" 0>" s, 2constant $0>
+s" 0<>" s, 2constant $0<>
 s" @" s, 2constant $@
 s" !" s, 2constant $!
 s" c@" s, 2constant $c@
@@ -2085,6 +2093,7 @@ variable num-neg
   2dup $0> str= if 2drop dup-pending @ 0 dup-pending !
     flush-swap ct-flush flush-pending
     if 2 cmp-pending ! else gen-0> then true exit then
+  2dup $0<> str= if 2drop flush-swap ct-flush flush-pending gen-0<> true exit then
   2dup $min str= if 2drop flush-swap ct-flush flush-pending gen-min true exit then
   2dup $max str= if 2drop flush-swap ct-flush flush-pending gen-max true exit then
   2dup $lshift str= if 2drop flush-swap ct-flush flush-pending gen-lshift true exit then
