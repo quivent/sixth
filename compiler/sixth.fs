@@ -64,8 +64,10 @@ DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
 DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
 DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
 DATA-BASE 14584 + constant rt-last-create \ address of last CREATE'd word's code
+DATA-BASE 14592 + constant rt-argc        \ command line argument count
+DATA-BASE 14600 + constant rt-argv        \ pointer to argv array
 
-variable data-here  DATA-BASE 14592 + data-here !
+variable data-here  DATA-BASE 14608 + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -1400,9 +1402,15 @@ variable is-recursive  0 is-recursive !
 variable start-jmp
 
 : gen-prologue ( -- )
-  $49 c, $bf c, $800000 $100000 + q,  \ r15 = data stack at 0x900000 (data segment)
-  $48 c, $bd c, $800000 $180000 + q,  \ rbp = return stack at 0x980000
-  $e9 c, code-here start-jmp ! 0 d, ;
+  \ Save argc and argv from Linux stack before setting up our stacks
+  $48 c, $8b c, $04 c, $24 c,              \ mov rax, [rsp]  (argc)
+  $48 c, $89 c, $04 c, $25 c, rt-argc d,   \ mov [rt-argc], rax
+  $48 c, $8d c, $44 c, $24 c, 8 c,         \ lea rax, [rsp+8]  (argv array)
+  $48 c, $89 c, $04 c, $25 c, rt-argv d,   \ mov [rt-argv], rax
+  \ Set up data and return stacks
+  $49 c, $bf c, $800000 $100000 + q,       \ r15 = data stack at 0x900000
+  $48 c, $bd c, $800000 $180000 + q,       \ rbp = return stack at 0x980000
+  $e9 c, code-here start-jmp ! 0 d, ;      \ jmp to main code
 
 : patch-start ( -- )
   code-here start-jmp @ patch-rel32 ;
@@ -1589,6 +1597,29 @@ variable start-jmp
 : gen-r/o ( -- )  push-tos  $31 c, $c0 c, ;  \ 0 = O_RDONLY
 : gen-w/o ( -- )  push-tos  $b8 c, 577 d, ;  \ O_WRONLY|O_CREAT|O_TRUNC = 1|64|512
 : gen-r/w ( -- )  push-tos  $b8 c, 2 d, ;    \ 2 = O_RDWR
+
+: gen-argc ( -- )  \ ( -- n )
+  push-tos
+  $48 c, $8b c, $04 c, $25 c, rt-argc d,   \ mov rax, [rt-argc]
+  1 stack-depth +! ;
+
+: gen-argv ( -- )  \ ( n -- addr u )
+  \ Get argv[n] as (addr u) string pair
+  \ Input: rax = n, stack-depth = 1
+  $48 c, $8b c, $3c c, $25 c, rt-argv d,   \ mov rdi, [rt-argv]
+  $48 c, $8b c, $3c c, $c7 c,              \ mov rdi, [rdi+rax*8] = argv[n]
+  \ rdi = pointer to null-terminated string, find length
+  $48 c, $31 c, $c0 c,                     \ xor rax, rax (length counter)
+  code-here                                 \ loop:
+  $80 c, $3c c, $07 c, 0 c,                \ cmp byte [rdi+rax], 0
+  $74 c, 5 c,                              \ jz done
+  $48 c, $ff c, $c0 c,                     \ inc rax
+  $eb c, code-here - 1- c,                  \ jmp loop
+  \ rax = length, rdi = start address
+  \ Result: NOS=addr, TOS=len
+  $48 c, $89 c, $fb c,                     \ mov rbx, rdi (addr)
+  \ rax already has length
+  1 stack-depth +! ;                        \ depth 1->2
 
 : gen-open-file ( -- )
   \ ( addr u fam -- fileid ior )
@@ -2235,6 +2266,8 @@ s" abort" s, 2constant $abort
 s" r/o" s, 2constant $r/o
 s" w/o" s, 2constant $w/o
 s" r/w" s, 2constant $r/w
+s" argc" s, 2constant $argc
+s" argv" s, 2constant $argv
 s" open-file" s, 2constant $open-file
 s" close-file" s, 2constant $close-file
 s" read-file" s, 2constant $read-file
@@ -2581,6 +2614,8 @@ variable num-neg
   2dup $close-file str= if 2drop flush-swap ct-flush flush-pending gen-close-file true exit then
   2dup $read-file str= if 2drop flush-swap ct-flush flush-pending gen-read-file true exit then
   2dup $write-file str= if 2drop flush-swap ct-flush flush-pending gen-write-file true exit then
+  2dup $argc str= if 2drop flush-swap ct-flush gen-argc true exit then
+  2dup $argv str= if 2drop flush-swap ct-flush flush-pending gen-argv true exit then
   \ ---- Pictured Numeric Output ----
   2dup $base str= if 2drop flush-swap ct-flush gen-base true exit then
   2dup $<# str= if 2drop flush-swap ct-flush gen-<# true exit then
@@ -3112,7 +3147,7 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 14592 + data-here !
+  DATA-BASE 14608 + data-here !
   gen-prologue
   emit-rt-parse
   emit-rt-find

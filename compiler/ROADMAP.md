@@ -25,7 +25,7 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 
 ## Current State
 
-~2800 lines of Forth. Compiles to x86-64 machine code. Single-pass.
+~3200 lines of Forth. Compiles to x86-64 machine code. Single-pass.
 
 ### Compiled Words (115+ total)
 
@@ -49,7 +49,7 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 ./sixth compiler/tests/run.fs
 ```
 
-1600 pass, 0 wrong, 51 skip. Single command. No bash.
+1607 pass, 0 wrong, 51 skip. Single command. No bash.
 
 ---
 
@@ -76,8 +76,8 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 [ ] 15. Delete engine/                    remove C interpreter
 [ ] 16. Forth test framework              replace bash test runner
 ------- SOVEREIGNTY COMPLETE -------
-[ ] 17. CLOCK-MS                          syscall 228 (timing)
-[ ] 18. ARGC ARGV                         command line args
+[x] 17. ARGC ARGV                         command line args
+[ ] 18. CLOCK-MS                          syscall 228 (timing)
 [ ] 19. GETENV                            environment variables
 [ ] 20. BYE                               syscall 60 (clean exit)
 [ ] 21. THROW CATCH                       exception handling
@@ -88,16 +88,16 @@ The goal is not a small line count — the goal is sovereignty AND speed.
 
 Words in interpreter but not native compiler. Required for practical use.
 
-| Word | Syscall | Purpose | Lines |
-|------|---------|---------|-------|
-| `clock-ms` | 228 (clock_gettime) | Timing, benchmarks | ~15 |
-| `argc` `argv` | N/A (kernel passes at startup) | Command line args | ~20 |
-| `getenv` | N/A (parse environ pointer) | Environment variables | ~25 |
-| `bye` | 60 (exit) | Clean exit from REPL | ~5 |
-| `throw` `catch` | N/A (stack manipulation) | Exception handling | ~40 |
+| Word | Syscall | Purpose | Lines | Status |
+|------|---------|---------|-------|--------|
+| `argc` `argv` | N/A (kernel passes at startup) | Command line args | ~20 | **DONE** |
+| `clock-ms` | 228 (clock_gettime) | Timing, benchmarks | ~15 | — |
+| `getenv` | N/A (parse environ pointer) | Environment variables | ~25 | — |
+| `bye` | 60 (exit) | Clean exit from REPL | ~5 | — |
+| `throw` `catch` | N/A (stack manipulation) | Exception handling | ~40 | — |
 
 **Notes:**
-- `argc`/`argv`: Linux puts these on stack at `[rsp]` and `[rsp+8]` at program start
+- `argc`/`argv`: **Done.** Prologue saves `[rsp]` and `[rsp+8]` to data segment.
 - `getenv`: `environ` pointer follows `argv` array (after NULL terminator)
 - `throw`/`catch`: Pure Forth, no syscall. Save/restore return stack.
 
@@ -118,24 +118,24 @@ Goal: Full interactive Forth system. Interprets, compiles, no C.
 
 ### Phase 1: Input Parsing — DONE
 
-### Phase 2: Dictionary — MOSTLY DONE
+### Phase 2: Dictionary — DONE
 
 | Word | Status |
 |------|--------|
 | FIND | DONE |
 | EXECUTE | DONE |
-| ' | NOT STARTED |
-| ['] | NOT STARTED |
-| >BODY | NOT STARTED |
+| ' | DONE |
+| ['] | DONE |
+| >BODY | DONE |
 
-### Phase 3: State Machine — NOT STARTED
+### Phase 3: State Machine — DONE
 
 | Word | Status |
 |------|--------|
 | STATE | DONE |
-| [ | NOT STARTED |
-| ] | NOT STARTED |
-| LITERAL | NOT STARTED |
+| [ | DONE |
+| ] | DONE |
+| LITERAL | DONE |
 
 ### Phase 4: Defining Words — DONE
 
@@ -145,14 +145,14 @@ Goal: Full interactive Forth system. Interprets, compiles, no C.
 | : ; | DONE |
 | IMMEDIATE | DONE |
 
-### Phase 5: Interpreter Loop — PARTIAL
+### Phase 5: Interpreter Loop — DONE
 
 | Word | Status |
 |------|--------|
 | INTERPRET | DONE |
 | EVALUATE | DONE |
-| ABORT | NOT STARTED |
-| QUIT | NOT STARTED |
+| ABORT | DONE |
+| QUIT | DONE |
 | POSTPONE | DONE (user words) |
 | DOES> | DONE (direct usage) |
 
@@ -164,19 +164,19 @@ Build in this exact order. Each word depends on the ones before it.
 
 **2. EVALUATE — DONE**
 
-**3. ABORT — next**
+**3. ABORT — DONE**
 - Simple: clear stacks, call QUIT
 - Error recovery
 
-**4. QUIT — after ABORT**
+**4. QUIT — DONE**
 - Main REPL loop
 - Calls REFILL, INTERPRET, repeats
 
-**5. POSTPONE**
+**5. POSTPONE — DONE**
 - Compiles code that compiles
 - Used for defining control structures in Forth
 
-**6. DOES>**
+**6. DOES> — DONE**
 - Sets runtime behavior of CREATE'd words
 - Used to define CONSTANT, VARIABLE, etc. in Forth itself
 
@@ -196,31 +196,31 @@ ABORT → QUIT → INTERPRET (circular, but QUIT is just the loop)
 OPEN-FILE → READ-FILE → READ-LINE → INCLUDE → EVALUATE
 ```
 
-### Phase 6: File I/O — PARTIAL
+### Phase 6: File I/O — MOSTLY DONE
 
 | Word | Status | Est. Lines |
 |------|--------|------------|
 | slurp-file | DONE (in interpreter) | — |
 | write-file | DONE (for ELF output) | — |
 | close-file | DONE | — |
-| OPEN-FILE | NOT STARTED | ~15 |
-| READ-FILE | NOT STARTED | ~15 |
+| OPEN-FILE | DONE | — |
+| READ-FILE | DONE | — |
 | READ-LINE | NOT STARTED | ~20 |
 | INCLUDE | NOT STARTED | ~20 |
 
-~70 lines total.
+~40 lines remaining.
 
 #### Implementation Order
 
-**7. OPEN-FILE**
+**7. OPEN-FILE — DONE**
 - Syscall wrapper (open)
 - Returns file handle
 
-**8. READ-FILE**
+**8. READ-FILE — DONE**
 - Syscall wrapper (read)
 - Needs file handle from OPEN-FILE
 
-**9. READ-LINE**
+**9. READ-LINE — next**
 - Uses READ-FILE
 - Scans for newline
 - Used by INCLUDE for line-by-line loading
@@ -276,11 +276,11 @@ See [SIXTH_OS.md](/SIXTH_OS.md).
 | Phase | Lines | Eliminates | Status |
 |-------|-------|------------|--------|
 | 1. Parsing | ~100 | C lexer | DONE |
-| 2. Dictionary | ~50 | C symbol table | NOT STARTED |
-| 3. State | ~20 | C state machine | NOT STARTED |
-| 4. Defining words | ~0 | C defining words | MOSTLY DONE |
-| 5. Interpreter | ~185 | C REPL | NOT STARTED |
-| 6. File I/O | ~70 | `cat`, pipes, heredocs | PARTIAL |
+| 2. Dictionary | ~50 | C symbol table | DONE |
+| 3. State | ~20 | C state machine | DONE |
+| 4. Defining words | ~0 | C defining words | DONE |
+| 5. Interpreter | ~185 | C REPL | DONE |
+| 6. File I/O | ~70 | `cat`, pipes, heredocs | MOSTLY DONE (~40 left) |
 | 7. Cleanup | 0 | **GCC dependency** | NOT STARTED |
 | 8. Native SQLite | ~100 | `sqlite3` shell-out | NOT STARTED |
 | 9. Test framework | ~80 | bash test runner | NOT STARTED |
@@ -288,10 +288,10 @@ See [SIXTH_OS.md](/SIXTH_OS.md).
 
 | Milestone | Lines | Depends On |
 |-----------|-------|------------|
-| Current | 2800 | C, bash, Linux |
-| After Phase 7 | ~3125 | bash, Linux |
-| After Phase 9 | ~3305 | Linux |
-| After Phase 10 | ~3290 | **nothing** |
+| Current | ~3200 | C, bash, Linux |
+| After Phase 7 | ~3240 | bash, Linux |
+| After Phase 9 | ~3320 | Linux |
+| After Phase 10 | ~3305 | **nothing** |
 
 ---
 
