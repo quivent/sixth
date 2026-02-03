@@ -26,7 +26,7 @@ run_one() {
 
     # Compile with timing
     local c_start=$(date +%s%N)
-    if ! ./sixth compiler/sixth.fs "$f" "$bin" >/dev/null 2>&1; then
+    if ! ./engine/fifth compiler/sixth.fs "$f" "$bin" >/dev/null 2>&1; then
         echo "$name:CFAIL:0:0" >> "$RESULTS"
         return
     fi

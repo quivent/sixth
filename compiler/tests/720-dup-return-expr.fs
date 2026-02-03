@@ -1,4 +1,4 @@
-\ expect: 5
+\ expect: 10
 \ Test 720: word with ( n -- n n ) used in expression
 : dup-it dup ;
 : main 5 dup-it + . cr ;
