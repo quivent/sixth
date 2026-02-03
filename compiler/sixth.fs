@@ -2450,17 +2450,17 @@ variable token-len
 : get-token ( -- addr u | 0 0 )
   skip-ws
   input-pos @ input-len @ >= if 0 0 exit then
-  input-buf input-pos @ + c@ [char] \ = if
+  input-buf input-pos @ + c@ 92 = if  \ 92 = backslash
     skip-line
     recurse exit
   then
-  input-buf input-pos @ + c@  [char] ( = if
+  input-buf input-pos @ + c@ 40 = if  \ 40 = open paren
     input-pos @ 1+ input-len @ < if
       input-buf input-pos @ 1+ + c@ 32 <= if
         1 input-pos +!
         begin
           input-pos @ input-len @ >= if 0 0 exit then
-          input-buf input-pos @ + c@ [char] ) = if
+          input-buf input-pos @ + c@ 41 = if  \ 41 = close paren
             1 input-pos +! recurse exit
           then
           1 input-pos +!
