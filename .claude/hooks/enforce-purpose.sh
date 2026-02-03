@@ -42,26 +42,16 @@ case "$TOOL_NAME" in
   Bash)
     COMMAND=$(echo "$TOOL_INPUT" | jq -r '.command // empty')
 
-    # Block test suite runs without approval
-    if [[ "$COMMAND" == *"test"* ]] && [[ "$COMMAND" == *"compiler"* ]]; then
-      jq -n --arg reminder "$REMINDER" '{
-        "hookSpecificOutput": {
-          "hookEventName": "PreToolUse",
-          "permissionDecision": "ask",
-          "permissionDecisionReason": "ENFORCEMENT: Running compiler tests requires explicit user request. Did the user ask for this?",
-          "additionalContext": $reminder
-        }
-      }'
-      exit 0
-    fi
+    # ALLOW: compilation, benchmarks, verification - these serve the purpose
+    # Block: investigation loops, debugging tangents, exploration without direction
 
-    # Block self-hosting attempts without approval
-    if [[ "$COMMAND" == *"sixth"* ]] && [[ "$COMMAND" == *"sixth.fs"* ]] && [[ "$COMMAND" == *"sixth.fs"*"sixth.fs"* ]]; then
+    # Block repeated investigation patterns (valgrind, strace, gdb without explicit request)
+    if [[ "$COMMAND" == *"valgrind"* ]] || [[ "$COMMAND" == *"strace"* ]] || [[ "$COMMAND" == *"gdb"* ]]; then
       jq -n --arg reminder "$REMINDER" '{
         "hookSpecificOutput": {
           "hookEventName": "PreToolUse",
           "permissionDecision": "ask",
-          "permissionDecisionReason": "ENFORCEMENT: Self-hosting attempts require explicit user request. Did the user ask to work on self-hosting?",
+          "permissionDecisionReason": "ENFORCEMENT: Debugging tools (valgrind/strace/gdb) require explicit user request. Are you investigating instead of building?",
           "additionalContext": $reminder
         }
       }'
