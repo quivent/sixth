@@ -1304,6 +1304,34 @@ variable call-rets   1 call-rets !
   code-here cf-push
   code-here cf-push ;
 
+: gen-?do ( -- do-addr )
+  \ Like gen-do but skips loop if limit <= start (uses jge instead of jz)
+  1 do-depth +!
+  0 do-depth @ 1- cells do-leave + !
+  $41 c, $54 c,                       \ push r12
+  $41 c, $55 c,                       \ push r13
+  $49 c, $89 c, $dd c,                \ mov r13, rbx (limit)
+  $49 c, $89 c, $c4 c,                \ mov r12, rax (start/index)
+  stack-depth @ 2 -
+  dup 2 = if
+    $48 c, $89 c, $c8 c,              \ mov rax, rcx
+    $49 c, $8b c, $1f c,              \ mov rbx, [r15]
+    $49 c, $83 c, $c7 c, 8 c,         \ add r15, 8
+  else dup 2 > if
+    $48 c, $89 c, $c8 c,              \ mov rax, rcx
+    $49 c, $8b c, $1f c,              \ mov rbx, [r15]
+    $49 c, $8b c, $4f c, 8 c,         \ mov rcx, [r15+8]
+    $49 c, $83 c, $c7 c, 16 c,        \ add r15, 16
+  else dup 1 = if
+    $48 c, $89 c, $c8 c,              \ mov rax, rcx
+  then then then
+  stack-depth !
+  $4d c, $39 c, $ec c,                \ cmp r12, r13
+  $0f c, $8d c,                       \ jge rel32 (skip if index >= limit)
+  0 d,
+  code-here cf-push
+  code-here cf-push ;
+
 : gen-loop ( -- )
   cf-pop  ( loop-start )
   \ OPTIMIZATION 10: do/loop elimination for constant-trip 1+ loops.
@@ -2226,6 +2254,7 @@ s" while" s, 2constant $while
 s" repeat" s, 2constant $repeat
 s" again" s, 2constant $again
 s" do" s, 2constant $do
+s" ?do" s, 2constant $?do
 s" loop" s, 2constant $loop
 s" +loop" s, 2constant $+loop
 s" i" s, 2constant $i
@@ -2771,6 +2800,17 @@ variable num-neg
     code-here do-depth @ cells do-origin + !    \ save rewind point AFTER flush
     stack-depth @ do-depth @ cells do-sdepth + !  \ save stack depth AFTER flush
     gen-do true exit then
+  2dup $?do str= if 2drop flush-swap
+    \ ?DO: like DO but skips if limit <= start
+    ct-depth @ 2 = stack-depth @ 0= and if
+      ct-stack 0 cells + @
+      ct-stack 1 cells + @
+      - do-depth @ cells do-trip + !
+    else -1 do-depth @ cells do-trip + ! then
+    ct-flush flush-pending
+    code-here do-depth @ cells do-origin + !
+    stack-depth @ do-depth @ cells do-sdepth + !
+    gen-?do true exit then
   2dup $loop str= if 2drop flush-swap ct-flush gen-loop true exit then
   2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop true exit then
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
