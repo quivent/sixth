@@ -1,8 +1,25 @@
 # CLAUDE.md - Sixth Project Context
 
+## PRIMARY PURPOSE
+
+**Build a compiler that compiles Forth-like code to native x86-64 FASTER than GCC -O2 compiles C, with runtime performance at parity or better.**
+
+This is the only goal that matters. Everything else serves this:
+- Inlining builtins → runtime speed
+- Constant folding → runtime speed
+- No interpretation overhead → compile speed + runtime speed
+- Self-hosting → delete C dependency, prove the compiler works
+
+Do NOT get distracted by:
+- "Forth purity" or traditional Forth architecture
+- Making INTERPRET work for arbitrary runtime code
+- Chuck Moore's 133 words or threaded code models
+
+The C interpreter is scaffolding for bootstrap. Once sixth compiles sixth, C is deleted.
+
 ## What Sixth Is
 
-Sixth is a practical Forth ecosystem with its own interpreter, compiler, and standard libraries. Built on Fifth, its predecessor. No external dependencies beyond standard Unix tools (sqlite3 for database features).
+Sixth is a native x86-64 compiler for a Forth-like language. It compiles source directly to ELF binaries with no runtime interpreter. Built on Fifth, its predecessor.
 
 **Name origin**: Forth -> Fifth -> Sixth. Each generation advancing Forth for modern development.
 
