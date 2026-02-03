@@ -3277,6 +3277,15 @@ create inc-input 8192 allot
   emit-rt-parse
   emit-rt-find
   compile-all
+  \ Check for unresolved forward references (resolved entries are zeroed)
+  fixup-count @ ?dup if
+    0 do
+      i fixup-entry c@ if
+        ." Unresolved: " i fixup-entry 24 type cr
+        1 throw
+      then
+    loop
+  then
   patch-start
   \ Reset compiler state for startup code
   0 stack-depth !  0 ct-depth !
