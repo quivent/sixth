@@ -93,7 +93,14 @@ static void p_pstore(vm_t *vm) { cell_t addr = pop(vm); cell_t val = pop(vm);
                                  mem_store(vm, addr, mem_fetch(vm, addr) + val); }
 
 static void p_here(vm_t *vm)  { push(vm, vm->here); }
-static void p_allot(vm_t *vm) { vm->here += pop(vm); }
+static void p_allot(vm_t *vm) {
+    cell_t n = pop(vm);
+    if (vm->here + n > MEM_SIZE) {
+        vm_abort(vm, "ALLOT: out of memory");
+        return;
+    }
+    vm->here += n;
+}
 static void p_cells(vm_t *vm) { *vm->sp *= sizeof(cell_t); }
 static void p_cell_plus(vm_t *vm) { *vm->sp += sizeof(cell_t); }
 
@@ -101,7 +108,13 @@ static void p_comma(vm_t *vm) {
     vm->here = vm_align(vm->here);
     vm_compile_cell(vm, pop(vm));
 }
+static int c_comma_count = 0;
 static void p_c_comma(vm_t *vm) {
+    c_comma_count++;
+    if (vm->here >= MEM_SIZE) {
+        fprintf(stderr, "c, overflow: here=%ld >= MEM_SIZE=%d\n", (long)vm->here, MEM_SIZE);
+        exit(1);
+    }
     mem_c_store(vm, vm->here, (uint8_t)pop(vm));
     vm->here++;
 }

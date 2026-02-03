@@ -176,11 +176,7 @@ void vm_abort(vm_t *vm, const char *msg) {
     vm->sp = vm->dstack + DSTACK_SIZE;
     vm->rsp = vm->rstack + RSTACK_SIZE;
     vm->state = 0;
-    /* If loading a file, close it and return to interactive */
-    while (vm->input_depth > 0) {
-        fclose(vm->input[vm->input_depth]);
-        vm->input_depth--;
-    }
+    vm->running = false;  /* Stop execution to prevent double-close */
 }
 
 /* === Outer Interpreter === */

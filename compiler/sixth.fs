@@ -72,7 +72,7 @@ DATA-BASE 14608 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
 variable data-here  DATA-BASE 14608 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
-256 constant INIT-MAX
+4096 constant INIT-MAX
 create init-buf INIT-MAX 24 * allot  \ (addr:8, value:8, size:8)
 variable init-count  0 init-count !
 : init-entry ( i -- addr ) 24 * init-buf + ;
@@ -3256,6 +3256,7 @@ create inc-input 8192 allot
     2dup $* str= if 2drop interp-val2 @ interp-val @ * interp-val ! exit then
     2dup $/ str= if 2drop interp-val2 @ interp-val @ / interp-val ! exit then
     2dup $cells str= if 2drop interp-val @ 8 * interp-val ! exit then
+    2dup $here str= if 2drop interp-val @ interp-val2 ! data-here @ interp-val ! exit then
     2dup parse-number if nip nip interp-val @ interp-val2 ! interp-val ! else
       \ Try dictionary lookup for constants
       2dup dict-find ?dup if
