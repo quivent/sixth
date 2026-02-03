@@ -1262,8 +1262,10 @@ variable call-rets   1 call-rets !
   stack-depth @ 2 >= call-nargs @ 2 < and if $53 c, then
   $e8 c,
   code-here 4 + - d,
-  stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then
-  stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then
+  stack-depth @ 2 >= call-nargs @ 2 < and if
+    call-rets @ 2 < if $5b c, else $59 c, then   \ pop rbx or pop rcx based on rets
+  then
+  stack-depth @ 3 >= call-nargs @ 3 < and call-rets @ 3 < and if $59 c, then
   call-nargs @ 2 = call-rets @ 1 = and if
     stack-depth @ 3 >= if
       $48 c, $89 c, $cb c,                  \ mov rbx, rcx
@@ -1273,6 +1275,8 @@ variable call-rets   1 call-rets !
       then
     then
     -1 stack-depth +!
+  else
+    call-rets @ call-nargs @ - stack-depth +!
   then ;
 
 : gen-ret ( -- )
@@ -2364,6 +2368,8 @@ s" #" s, 2constant $#
 s" #s" s, 2constant $#s
 s" #>" s, 2constant $#>
 s" c," s, 2constant $c,
+s" s," s, 2constant $s,
+s" 2constant" s, 2constant $2constant
 s" key" s, 2constant $key
 s" bl" s, 2constant $bl
 s" true" s, 2constant $true
@@ -2933,6 +2939,7 @@ variable num-neg
   2drop 0 ;
 
 variable scan-nargs
+variable scan-rets
 variable scan-void
 variable scan-io
 
@@ -2951,7 +2958,7 @@ variable scan-io
   input-pos @ 1+ input-len @ >= if exit then
   input-buf input-pos @ 1+ + c@ 32 > if exit then
   1 input-pos +!
-  1 scan-void !  0 scan-nargs !
+  1 scan-void !  0 scan-nargs !  0 scan-rets !
   0 >r
   begin
     scan-skip-ws
@@ -2964,16 +2971,16 @@ variable scan-io
           drop 2 input-pos +! r> drop 1 >r
         else
           begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
-          r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+          r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
         then
       else
         begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
-        r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+        r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
       then
     else
       drop
       begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
-      r> dup if 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
+      r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
     then
   again ;
 
@@ -3007,7 +3014,7 @@ variable scan-body-pos
   r@ 40 0 fill                                     \ clear entire entry
   scan-name-buf r@ scan-name-len @ dup 23 > if drop 23 then move
   scan-nargs @ 1 max r@ 24 + c!                    \ nargs at 24 (1 byte)
-  scan-void @ 0= if 1 else 0 then r@ 25 + c!       \ rets at 25 (1 byte)
+  scan-rets @ 1 max r@ 25 + c!                      \ rets at 25 (1 byte)
   scan-io @ r@ 26 + c!                             \ flags at 26 (1 byte)
   \ call-count at 28 (2 bytes) - already 0 from fill
   scan-body-pos @ r@ 30 + !                        \ body-pos at 30 (4 bytes)
@@ -3227,6 +3234,24 @@ create inc-input 8192 allot
   2dup $c, str= if
     2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
   then
+  \ s, in interpret mode: string already in data area from s", just keep addr/len
+  dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] , = and if
+    2drop exit  \ s" already stored string, addr/len in interp-val2/interp-val
+  then then
+  \ 2constant: create word that pushes two values (addr len for strings)
+  2dup $2constant str= if
+    2drop get-token
+    dup 0= if 2drop ." Expected name after 2constant" cr 1 throw then
+    dict-add
+    \ Generate: mov rbx,rax; mov rax,val1; mov rbx,rax; mov rax,val2; ret
+    $48 c, $89 c, $c3 c,                      \ mov rbx, rax (save TOS)
+    $48 c, $b8 c, interp-val2 @ q,            \ mov rax, addr
+    $48 c, $89 c, $c3 c,                      \ mov rbx, rax (addr -> NOS)
+    $48 c, $b8 c, interp-val @ q,             \ mov rax, len
+    $c3 c,                                    \ ret
+    5 256 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !  \ 0 args, 2 rets, inline
+    exit
+  then
   2dup $] str= if 2drop 1 state ! exit then
   2dup $literal str= if 2drop interp-val @ ct-push exit then
   2dup $include str= if
@@ -3257,6 +3282,23 @@ create inc-input 8192 allot
     2dup $/ str= if 2drop interp-val2 @ interp-val @ / interp-val ! exit then
     2dup $cells str= if 2drop interp-val @ 8 * interp-val ! exit then
     2dup $here str= if 2drop interp-val @ interp-val2 ! data-here @ interp-val ! exit then
+    \ s" in interpret mode: parse string into data area, return addr len
+    dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] " = and if
+      2drop 1 input-pos +!
+      data-here @                    \ save start addr
+      0                              \ len counter
+      begin
+        input-pos @ input-len @ >= if true else
+        input-buf input-pos @ + c@ [char] " = if
+          1 input-pos +! true
+        else
+          input-buf input-pos @ + c@ data-here @ 1 add-init
+          1 data-here +! 1 input-pos +! 1+ false
+        then then
+      until
+      \ Stack: ( start-addr len )
+      interp-val2 ! interp-val ! exit
+    then then
     2dup parse-number if nip nip interp-val @ interp-val2 ! interp-val ! else
       \ Try dictionary lookup for constants
       2dup dict-find ?dup if
