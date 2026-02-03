@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1032: Double pass - mutual forward reference pattern
 \ REGRESSION: A calls B (forward), B calls C (forward). Pass 1 must
 \ discover all three before Pass 2 compiles.

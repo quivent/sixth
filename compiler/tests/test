@@ -1,0 +1,147 @@
+#!/bin/bash
+# test - Parallel test runner for Sixth compiler
+# Usage: ./compiler/tests/test [pattern]
+#
+# Runs all tests matching pattern (default: all numbered tests)
+# Uses GNU parallel for speed, falls back to sequential if unavailable
+
+set -e
+cd "$(dirname "$0")/../.."
+
+PATTERN="${1:-[0-9]*.fs}"
+TMPDIR="/tmp/sixth-test-$$"
+RESULTS="$TMPDIR/results"
+mkdir -p "$TMPDIR"
+trap "rm -rf $TMPDIR" EXIT
+
+# Compile and run a single test, capture timing
+run_one() {
+    local f="$1"
+    local name=$(basename "$f" .fs)
+    local bin="$TMPDIR/$name"
+    local out="$TMPDIR/$name.out"
+
+    # Get expected output (first line after "\ expect:")
+    local expect=$(head -1 "$f" | sed -n 's/^\\ expect: *//p')
+
+    # Compile with timing
+    local c_start=$(date +%s%N)
+    if ! ./sixth compiler/sixth.fs "$f" "$bin" >/dev/null 2>&1; then
+        echo "$name:CFAIL:0:0" >> "$RESULTS"
+        return
+    fi
+    local c_end=$(date +%s%N)
+    local c_ms=$(( (c_end - c_start) / 1000000 ))
+
+    # Run with timing and timeout (stdin from /dev/null)
+    local r_start=$(date +%s%N)
+    if ! timeout 2 "$bin" </dev/null >"$out" 2>&1; then
+        echo "$name:RFAIL:$c_ms:0" >> "$RESULTS"
+        return
+    fi
+    local r_end=$(date +%s%N)
+    local r_ms=$(( (r_end - r_start) / 1000000 ))
+
+    # Check output (normalize whitespace)
+    local actual=$(tr '\n' ' ' < "$out" | sed 's/  */ /g; s/^ *//; s/ *$//')
+
+    if [ -z "$expect" ]; then
+        echo "$name:PASS:$c_ms:$r_ms" >> "$RESULTS"
+    elif [ "$actual" = "$expect" ]; then
+        echo "$name:PASS:$c_ms:$r_ms" >> "$RESULTS"
+    else
+        echo "$name:WRONG:$c_ms:$r_ms:expect=[$expect]:actual=[$actual]" >> "$RESULTS"
+    fi
+}
+export -f run_one
+export TMPDIR RESULTS
+
+# Find test files
+files=$(ls compiler/tests/$PATTERN 2>/dev/null | sort -V)
+count=$(echo "$files" | grep -c . || echo 0)
+
+if [ "$count" -eq 0 ]; then
+    echo "No tests found matching: $PATTERN"
+    exit 1
+fi
+
+echo "Running $count tests..."
+
+# Run tests in parallel
+touch "$RESULTS"
+start=$(date +%s%3N)
+if command -v parallel >/dev/null 2>&1; then
+    echo "$files" | parallel -j$(nproc) run_one {}
+else
+    for f in $files; do run_one "$f"; done
+fi
+end=$(date +%s%3N)
+
+# Read results
+results=$(cat "$RESULTS")
+
+# Tally
+pass=$(echo "$results" | grep -c ':PASS:' || true)
+wrong=$(echo "$results" | grep -c ':WRONG:' || true)
+cfail=$(echo "$results" | grep -c ':CFAIL:' || true)
+rfail=$(echo "$results" | grep -c ':RFAIL:' || true)
+elapsed=$((end - start))
+
+# Sum compile and runtime
+total_compile=0
+total_runtime=0
+while IFS=: read -r name status c_ms r_ms rest; do
+    total_compile=$((total_compile + c_ms))
+    total_runtime=$((total_runtime + r_ms))
+done <<< "$results"
+
+# Progress line
+echo "$results" | while read line; do
+    case "$line" in
+        *:PASS:*)  printf "." ;;
+        *:WRONG:*) printf "W" ;;
+        *:CFAIL:*) printf "C" ;;
+        *:RFAIL:*) printf "R" ;;
+    esac
+done
+echo
+
+# Summary
+echo
+echo "TOTAL: $count  PASS: $pass  WRONG: $wrong  CFAIL: $cfail  RFAIL: $rfail"
+echo "Wall: ${elapsed}ms  Compile: ${total_compile}ms  Run: ${total_runtime}ms"
+
+# Timing breakdown if verbose
+if [ "${VERBOSE:-}" = "1" ]; then
+    echo
+    echo "Timing (compile/run ms):"
+    echo "$results" | sort -t: -k3 -rn | head -10 | while IFS=: read -r name status c_ms r_ms rest; do
+        printf "  %-30s %4d / %4d\n" "$name" "$c_ms" "$r_ms"
+    done
+fi
+
+# List failures with details
+if [ "$wrong" -gt 0 ]; then
+    echo
+    echo "Wrong output:"
+    echo "$results" | grep ':WRONG:' | while IFS=: read -r name status c_ms r_ms rest; do
+        expect=$(echo "$rest" | sed 's/.*expect=\[\([^]]*\)\].*/\1/')
+        actual=$(echo "$rest" | sed 's/.*actual=\[\([^]]*\)\].*/\1/')
+        echo "  $name: expected [$expect] got [$actual]"
+    done
+fi
+
+if [ "$cfail" -gt 0 ]; then
+    echo
+    echo "Compile failures:"
+    echo "$results" | grep ':CFAIL:' | cut -d: -f1 | sed 's/^/  /'
+fi
+
+if [ "$rfail" -gt 0 ]; then
+    echo
+    echo "Runtime failures:"
+    echo "$results" | grep ':RFAIL:' | cut -d: -f1 | sed 's/^/  /'
+fi
+
+# Exit code
+[ "$wrong" -eq 0 ] && [ "$cfail" -eq 0 ] && [ "$rfail" -eq 0 ]

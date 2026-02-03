@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1015: Constant folding - chained operations
 \ REGRESSION: Verifies that multiple constant folds chain correctly.
 \ 3 * 7 + $FFFFFF and should fully fold at compile time when all

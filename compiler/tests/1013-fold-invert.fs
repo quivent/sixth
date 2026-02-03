@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1013: Constant folding - unary invert
 \ REGRESSION: Verifies compile-time folding of invert on a literal
 : fail begin again ;

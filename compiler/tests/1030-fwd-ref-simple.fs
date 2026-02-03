@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1030: Double pass - forward reference
 \ REGRESSION: Verifies that Pass 1 (scan-all) builds the word-info
 \ table so Pass 2 can resolve forward references correctly.

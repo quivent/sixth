@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1021: Literal-op fusion - XOR immediate
 \ REGRESSION: Verifies gen-xor-imm correctness.
 : val ( -- n ) $FF ;

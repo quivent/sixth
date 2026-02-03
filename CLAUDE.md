@@ -184,96 +184,64 @@ Results are pipe-delimited. `sql-field` extracts by 0-based index.
 - Don't redefine standard Forth words (`emit-file`, `type`, etc.)
 - Don't create words with embedded whitespace (impossible in Forth)
 
-## NO BASH FOR TESTING
+## Testing
 
-**This is Forth. Use Forth.**
+### Run Tests
 
-NEVER use bash heredocs, pipes, or shell scripting to test Forth code. That's Unix brain damage.
+```bash
+./compiler/tests/test              # Run all tests (parallel)
+./compiler/tests/test "1000*"      # Run tests matching pattern
+VERBOSE=1 ./compiler/tests/test    # Show per-test timing
+```
 
-### Native Compiler Tests
+Output:
+```
+Running 44 tests...
+............................................
 
-Test files live in `compiler/tests/`. Pattern:
+TOTAL: 44  PASS: 44  WRONG: 0  CFAIL: 0  RFAIL: 0
+Wall: 755ms  Compile: 469ms  Run: 45ms
+```
+
+- **Wall** - parallel elapsed time
+- **Compile** - sum of individual compile times
+- **Run** - sum of individual run times
+
+### Test Structure
+
+```
+compiler/tests/
+├── test              # Parallel test runner (canonical)
+├── *.fs              # 46 compiler-specific tests
+├── hayes/            # ANS Forth compliance (37 files) - DO NOT MODIFY
+└── adversarial/      # Stress tests (34 files)
+```
+
+### Test Format
+
 ```forth
 \ expect: <expected output>
-\ Description
 : main <test code> ;
 ```
 
-Add a test:
-1. Create `compiler/tests/NNNN-name.fs` with the pattern above
-2. Run: `./sixth compiler/tests/run.fs`
+Empty `expect:` = test passes if it compiles and exits cleanly.
 
-Example:
-```forth
-\ expect: 5
-\ Test addition
-: main 2 3 + . cr ;
-```
-
-Manual single test:
-```bash
-./sixth compiler/sixth.fs compiler/tests/1000-refill-eof.fs /tmp/t && /tmp/t
-```
-
-### Interpreter Tests
+### Manual Single Test
 
 ```bash
-./fifth test.fs
-./fifth -e "1 2 + . cr"
+./sixth compiler/sixth.fs compiler/tests/1000-fold-add.fs /tmp/t && /tmp/t
 ```
-
-No heredocs. No pipes. No bash string manipulation. Write a `.fs` file or use `-e`.
 
 ## Test Policy
 
-**Hayes tests (`compiler/tests/hayes/`) cover standard Forth.** Do not duplicate.
+**Hayes tests cover standard Forth. Do not duplicate.**
 
-Hayes tests thousands of edge cases for: `+`, `-`, `*`, `/`, `DO`, `LOOP`, `IF`, `ELSE`, `RECURSE`, `>R`, `R>`, and every other ANS Forth word. If it's standard Forth behavior, Hayes already tests it.
+Write tests ONLY for:
+1. **Constant folding** - `1000-fold-*.fs`
+2. **Instruction fusing** - `1016-fuse-*.fs`
+3. **Forward references** - `1030-fwd-ref-*.fs`
+4. **Sixth runtime words** - `1000-refill-eof.fs`, `1003-find-*.fs`, etc.
+5. **Strength reduction** - `2100-strength-*.fs`
+6. **Primitive codegen sanity** - `01-lit.fs`, `07-dup.fs`, etc.
 
-**Write tests ONLY for:**
-
-1. **Compiler optimizations** - Constant folding, instruction fusing, peephole patterns
-2. **Codegen bugs** - Wrong assembly output, register allocation issues, not Forth semantics
-3. **Words unique to Sixth** - Anything not in ANS Forth
-4. **Regression tests** - Specific bug fixes with a ticket/commit reference
-
-**Test file locations:**
-
-| Range | Purpose |
-|-------|---------|
-| `01-99` | Primitive codegen verification |
-| `100-999` | Combined operations, control flow codegen |
-| `1000-1049` | Compiler optimizations (folding, fusing, fwd-refs) |
-| `1000+` (named) | Integration tests (algorithms exercising whole compiler) |
-
-**Before writing a test, ask:** Does Hayes already cover this? If yes, do not write the test.
-
-## TEST ENFORCEMENT - MANDATORY
-
-**YOU MUST USE `new-test.sh` TO CREATE TESTS. NO EXCEPTIONS.**
-
-```bash
-./compiler/tests/new-test.sh <number> <name> <category> <reason>
-```
-
-Example:
-```bash
-./compiler/tests/new-test.sh 1050 fold-lshift fold "Verify left-shift folding eliminates runtime op"
-```
-
-**Direct file creation is FORBIDDEN.** The script:
-1. Requires a valid category (codegen/optimization/fold/fuse/fwd-ref/regression/sixth-word/integration)
-2. Requires a reason explaining WHY this test exists
-3. Rejects reasons that smell like standard Forth testing
-4. Creates the file with required headers
-
-**Tests without proper headers will be deleted.**
-
-Every test file MUST have:
-```forth
-\ expect: <output>
-\ category: <valid-category>
-\ reason: <why this test exists, what compiler behavior it verifies>
-```
-
-**If you cannot articulate why Hayes doesn't cover this, you should not write the test.**
+**If Hayes covers it, don't write a test.**

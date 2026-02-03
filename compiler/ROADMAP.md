@@ -8,11 +8,13 @@ No bash. No shell scripts. No piping. No heredocs. No shelling out. Every extern
 
 When complete, Sixth needs only a kernel that loads ELF binaries. Everything else is Forth.
 
-**2. Sixth outperforms GCC -O2.**
+**2. Sixth will outperform GCC -O2.**
 
-Not "acceptable performance." Not "close enough." Faster. On the benchmarks that matter — recursive functions, tight loops, integer math — Sixth-compiled code beats GCC -O2 compiled C.
+The goal: faster than GCC -O2 on the benchmarks that matter — tight loops, integer math, stack operations.
 
-This is possible because:
+**Current state**: Competitive on simple loops (1.0x), behind on complex control flow (1.3-2x), weak on deep recursion (3-5x). The gap is closable.
+
+**Path to victory**:
 - Stack caching keeps hot values in registers (no memory traffic)
 - Superinstructions fuse common patterns into single ops
 - Constant folding eliminates work at compile time

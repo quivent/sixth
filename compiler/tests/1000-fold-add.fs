@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1000: Constant folding - addition
 \ REGRESSION: Verifies compile-time constant folding for +
 \ Two literals followed by + should fold to a single constant.

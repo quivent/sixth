@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1019: Literal-op fusion - AND immediate
 \ REGRESSION: Verifies gen-and-imm correctness. Key for arith benchmark.
 : inc ( n -- n+1 ) 1+ ;

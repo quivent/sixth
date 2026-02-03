@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1016: Literal-op fusion - add immediate
 \ REGRESSION: When one operand is runtime and one is a literal,
 \ the compiler should emit a fused add-imm instruction instead of

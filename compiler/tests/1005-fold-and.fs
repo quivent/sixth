@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1005: Constant folding - bitwise AND
 \ REGRESSION: Verifies compile-time constant folding for and
 : fail begin again ;

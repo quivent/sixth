@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1001: Constant folding - subtraction
 \ REGRESSION: Verifies compile-time constant folding for -
 : fail begin again ;

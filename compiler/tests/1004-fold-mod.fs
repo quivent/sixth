@@ -1,3 +1,4 @@
+\ expect:
 \ Test 1004: Constant folding - modulo
 \ REGRESSION: Verifies compile-time constant folding for mod
 : fail begin again ;
