@@ -3038,7 +3038,19 @@ variable scan-body-pos
 
 : compile-token ( addr u -- )
   0 tail-recurse !
-  \ User definitions override builtins (standard Forth semantics)
+  \ Check info-buf first (has call-count for future inlining)
+  2dup info-find ?dup if
+    dup 24 + c@ call-nargs !
+    dup 25 + c@ dup 0= if drop 1 then call-rets !
+    34 + @                             \ ( addr u code-addr )
+    ?dup if                            \ code-addr != 0: word is compiled
+      -rot 2drop                       \ ( code-addr )
+      flush-swap ct-flush
+      gen-call exit
+    then
+    \ code-addr = 0: not yet compiled, fall through to dict-find or forward ref
+  then
+  \ User definitions - dict-find handles $800 stubs for variables/constants
   2dup dict-find ?dup if
     nip nip flush-swap ct-flush
     \ INLINE: variable/constant stubs → ct-push the literal value
@@ -3053,9 +3065,6 @@ variable scan-body-pos
       drop arg-count @ call-nargs !
       1 call-rets !
     then
-    \ INLINE: DISABLED - dup-pending optimization makes inlining incorrect
-    \ "dup *" compiles to imul rax,rbx assuming rbx=copy of rax.
-    \ When inlined, rbx contains caller's NOS, not a dup of TOS.
     dict-addr @ gen-call exit
   then
   \ No user definition — try builtins and numbers
