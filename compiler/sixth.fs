@@ -13,7 +13,7 @@
 
 4096 constant CODE-SIZE
 256 constant DICT-SIZE
-4096 constant INPUT-SIZE
+150000 constant INPUT-SIZE
 
 create code-buf CODE-SIZE allot
 variable code-pos  0 code-pos !
@@ -66,8 +66,10 @@ DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
 DATA-BASE 14584 + constant rt-last-create \ address of last CREATE'd word's code
 DATA-BASE 14592 + constant rt-argc        \ command line argument count
 DATA-BASE 14600 + constant rt-argv        \ pointer to argv array
+DATA-BASE 14608 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
+262144 constant SLURP-SIZE
 
-variable data-here  DATA-BASE 14608 + data-here !
+variable data-here  DATA-BASE 14608 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
 64 constant INIT-MAX
@@ -83,6 +85,7 @@ variable init-count  0 init-count !
 \ Compilation state
 variable state  0 state !   \ 0=interpret, 1=compile
 variable interp-val  0 interp-val !
+variable interp-val2 0 interp-val2 !  \ second slot for interpret mode
 variable rt-find-addr  0 rt-find-addr !  \ Runtime FIND function address
 variable tos-cached  1 tos-cached !  \ Track if TOS is in rax
 variable full-source  0 full-source !  \ 0=fast (direct rt-source-buf), 1=full (indirect rt-source-addr)
@@ -261,8 +264,10 @@ variable fixup-target  0 fixup-target !
   dup 2 >= if
     $48 c, $89 c, $d9 c,
   then
+  dup 1 >= if
+    $48 c, $89 c, $c3 c,
+  then
   drop
-  $48 c, $89 c, $c3 c,
   1 stack-depth +! ;
 
 : pop-tos ( -- )
@@ -1252,16 +1257,8 @@ variable call-rets   1 call-rets !
   code-here 4 + - d,
   stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then
   stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then
-  call-nargs @ 2 = call-rets @ 1 = and if
-    stack-depth @ 3 >= if
-      $48 c, $89 c, $cb c,
-      stack-depth @ 4 >= if
-        $49 c, $8b c, $0f c,
-        $49 c, $83 c, $c7 c, 8 c,
-      then
-    then
-    -1 stack-depth +!
-  then ;
+  \ Adjust stack-depth based on call signature: add (rets - nargs)
+  call-rets @ call-nargs @ - stack-depth +! ;
 
 : gen-ret ( -- )
   do-depth @ 0 ?do
@@ -1723,7 +1720,46 @@ variable start-jmp
   -2 stack-depth +!
   ;
 
-\ READ-LINE not needed - INCLUDE will slurp whole file and EVALUATE
+: gen-slurp-file ( -- )
+  \ ( addr u -- addr2 u2 )
+  \ Reads file into rt-slurp-buf. Returns 0 0 on error.
+  1 has-io !
+  \ Copy path to rt-word-buf and null-terminate
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
+  $48 c, $89 c, $de c,                     \ mov rsi, rbx
+  $48 c, $89 c, $c1 c,                     \ mov rcx, rax
+  $f3 c, $a4 c,                            \ rep movsb
+  $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0
+  \ Open syscall
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
+  $31 c, $f6 c,                            \ xor esi, esi
+  $31 c, $d2 c,                            \ xor edx, edx
+  $b8 c, 2 d,                              \ mov eax, 2
+  $0f c, $05 c,                            \ syscall
+  $48 c, $85 c, $c0 c,                     \ test rax, rax
+  $78 c, 46 c,                             \ js +46 to error
+  $57 c,                                    \ push rdi (will reuse for close)
+  $48 c, $89 c, $c7 c,                     \ mov rdi, rax
+  $57 c,                                    \ push rdi (fd)
+  \ Read syscall
+  $48 c, $be c, rt-slurp-buf q,            \ mov rsi, rt-slurp-buf
+  $ba c, SLURP-SIZE d,                     \ mov edx, SLURP-SIZE
+  $31 c, $c0 c,                            \ xor eax, eax
+  $0f c, $05 c,                            \ syscall
+  $50 c,                                    \ push rax (bytes)
+  \ Close syscall
+  $48 c, $8b c, $7c c, $24 c, 8 c,         \ mov rdi, [rsp+8]
+  $b8 c, 3 d,                              \ mov eax, 3
+  $0f c, $05 c,                            \ syscall
+  \ Return
+  $58 c,                                    \ pop rax (bytes)
+  $48 c, $83 c, $c4 c, 16 c,               \ add rsp, 16
+  $48 c, $bb c, rt-slurp-buf q,            \ mov rbx, rt-slurp-buf
+  $eb c, 4 c,                              \ jmp +4
+  \ Error
+  $31 c, $c0 c,                            \ xor eax, eax
+  $31 c, $db c,                            \ xor ebx, ebx
+  ;
 
 \ ============================================================
 \ PICTURED NUMERIC OUTPUT
@@ -2083,6 +2119,15 @@ variable rt-parse-addr  0 rt-parse-addr !
   $49 c, $bf c, $800000 $100000 + q,            \ mov r15, 0x900000
   gen-quit ;
 
+: gen-include ( -- )
+  \ Parse filename, slurp file, evaluate contents
+  1 has-io !
+  $49 c, $b8 c, rt-parse-addr @ q,             \ mov r8, rt-parse-addr
+  $41 c, $ff c, $d0 c,                         \ call r8  -> rbx=addr, rax=len
+  2 stack-depth !
+  gen-slurp-file                                \ ( addr u -- addr2 u2 )
+  gen-evaluate ;                                \ ( addr2 u2 -- )
+
 \ ============================================================
 \ STRING COMPARE
 \ ============================================================
@@ -2263,6 +2308,7 @@ s" interpret" s, 2constant $interpret
 s" evaluate" s, 2constant $evaluate
 s" quit" s, 2constant $quit
 s" abort" s, 2constant $abort
+s" include" s, 2constant $include
 s" r/o" s, 2constant $r/o
 s" w/o" s, 2constant $w/o
 s" r/w" s, 2constant $r/w
@@ -2272,6 +2318,8 @@ s" open-file" s, 2constant $open-file
 s" close-file" s, 2constant $close-file
 s" read-file" s, 2constant $read-file
 s" write-file" s, 2constant $write-file
+s" slurp-file" s, 2constant $slurp-file
+s" include" s, 2constant $include
 
 \ ============================================================
 \ TOKENIZER
@@ -2614,6 +2662,8 @@ variable num-neg
   2dup $close-file str= if 2drop flush-swap ct-flush flush-pending gen-close-file true exit then
   2dup $read-file str= if 2drop flush-swap ct-flush flush-pending gen-read-file true exit then
   2dup $write-file str= if 2drop flush-swap ct-flush flush-pending gen-write-file true exit then
+  2dup $slurp-file str= if 2drop flush-swap ct-flush flush-pending gen-slurp-file true exit then
+  2dup $include str= if 2drop flush-swap ct-flush flush-pending gen-include true exit then
   2dup $argc str= if 2drop flush-swap ct-flush gen-argc true exit then
   2dup $argv str= if 2drop flush-swap ct-flush flush-pending gen-argv true exit then
   \ ---- Pictured Numeric Output ----
@@ -2703,15 +2753,18 @@ variable num-neg
   2dup $repeat str= if 2drop flush-swap ct-flush cf-pop cf-pop gen-repeat true exit then
   2dup $again str= if 2drop flush-swap ct-flush cf-pop gen-again true exit then
   2dup $do str= if 2drop flush-swap
-    \ OPTIMIZATION 10: save known trip count and code position before ct-flush.
-    ct-depth @ 2 >= if
-      ct-stack ct-depth @ 2 - cells + @   \ limit (deeper)
-      ct-stack ct-depth @ 1 - cells + @   \ start (shallower)
+    \ OPTIMIZATION 10: save known trip count and code position.
+    \ Only optimize when: ct-depth=2 (just limit/start) AND stack-depth=0 (no runtime values).
+    \ This ensures nested loops and loops with accumulators are NOT optimized away.
+    ct-depth @ 2 = stack-depth @ 0= and if
+      ct-stack 0 cells + @   \ limit (first/deeper)
+      ct-stack 1 cells + @   \ start (second/shallower)
       - do-depth @ cells do-trip + !      \ trip = limit - start
     else -1 do-depth @ cells do-trip + ! then
-    code-here do-depth @ cells do-origin + !    \ save rewind point
-    stack-depth @ do-depth @ cells do-sdepth + !  \ save stack depth
-    ct-flush flush-pending gen-do true exit then
+    ct-flush flush-pending
+    code-here do-depth @ cells do-origin + !    \ save rewind point AFTER flush
+    stack-depth @ do-depth @ cells do-sdepth + !  \ save stack depth AFTER flush
+    gen-do true exit then
   2dup $loop str= if 2drop flush-swap ct-flush gen-loop true exit then
   2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop true exit then
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
@@ -2939,10 +2992,12 @@ variable ret-count 1 ret-count !
         input-buf input-pos @ 1+ + c@ [char] - = if
           drop 2 input-pos +! r> drop 1 >r
         else
+          drop  \ drop the '-' char
           begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
           r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
         then
       else
+        drop  \ drop the '-' char
         begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
         r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
       then
@@ -2963,7 +3018,7 @@ variable ret-count 1 ret-count !
   1 arg-count !
   1 ret-count !
   parse-stack-comment
-  arg-count @ 1 max stack-depth !
+  arg-count @ stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
@@ -2986,6 +3041,9 @@ variable ret-count 1 ret-count !
   dict-buf dict-count @ 1- 32 * + dict-flags !
   0 is-recursive !
   0 state ! ;
+
+\ INCLUDE support - temp buffer for splice operation
+create inc-input 8192 allot
 
 : compile-word ( addr u -- )
   2dup $: str= if
@@ -3041,15 +3099,36 @@ variable ret-count 1 ret-count !
   then
   2dup $] str= if 2drop 1 state ! exit then
   2dup $literal str= if 2drop interp-val @ ct-push exit then
+  2dup $include str= if
+    2drop get-token
+    dup 0= if ." include-noname " 2drop 1 throw then
+    slurp-file  ( file-addr file-len )
+    dup 0= if ." include-notfound " 2drop 1 throw then
+    \ Splice file into input buffer at current position
+    input-len @ input-pos @ - ( file-addr file-len remaining )
+    input-buf input-pos @ + inc-input 2 pick move  \ save remaining to temp
+    2 pick input-buf input-pos @ + 3 pick move     \ copy file content
+    input-pos @ 2 pick +                           \ new-end = pos + file-len
+    inc-input input-buf 2 pick + 2 pick move       \ append remaining
+    + input-len !  2drop                           \ new-len = new-end + remaining
+    exit
+  then
   state @ if
     compile-token
   else
-    2dup parse-number if nip nip interp-val ! else
+    \ Handle ! in interpret mode: ( val addr -- ) record as init
+    2dup $! str= if
+      2drop
+      interp-val2 @ interp-val @ 8 add-init
+      exit
+    then
+    2dup parse-number if nip nip interp-val @ interp-val2 ! interp-val ! else
       \ Try dictionary lookup for constants
       2dup dict-find ?dup if
         nip nip
         dup dict-flags @ $800 and if
           \ Inline constant: extract value from stub
+          interp-val @ interp-val2 !
           dict-addr @ $FFFFFFFF and 2 + code-buf + @ interp-val !
         else
           ." Unexpected word in interpret mode: " 2drop type cr
@@ -3147,7 +3226,7 @@ variable ret-count 1 ret-count !
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 14608 + data-here !
+  DATA-BASE 14608 SLURP-SIZE + + data-here !
   gen-prologue
   emit-rt-parse
   emit-rt-find
