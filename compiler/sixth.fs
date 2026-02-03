@@ -2889,8 +2889,7 @@ variable num-neg
   2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
   2dup $recursive str= if 2drop 1 is-recursive ! true exit then
   2dup $recurse str= if
-    is-recursive @ 0= if 2drop ." recurse requires recursive declaration" cr 1 throw then
-    2drop flush-swap ct-flush code-here tail-recurse ! gen-recurse true exit then
+    2drop flush-swap ct-flush 1 is-recursive ! code-here tail-recurse ! gen-recurse true exit then
   2dup $>r str= if 2drop flush-swap ct-flush gen->r true exit then
   2dup $r> str= if 2drop flush-swap ct-flush gen-r> true exit then
   2dup $r@ str= if 2drop flush-swap ct-flush gen-r@ true exit then
