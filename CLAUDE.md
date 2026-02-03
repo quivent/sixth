@@ -4,18 +4,52 @@
 
 **Build a compiler that compiles Forth-like code to native x86-64 FASTER than GCC -O2 compiles C, with runtime performance at parity or better.**
 
-This is the only goal that matters. Everything else serves this:
+## MANDATORY ENFORCEMENT - READ BEFORE ANY ACTION
+
+**STOP. Before writing ANY code or starting ANY task, answer these questions:**
+
+1. Does this task directly improve COMPILE SPEED or RUNTIME SPEED?
+2. If not, does the user EXPLICITLY request it?
+
+If both answers are NO: **DO NOT DO THE TASK. Ask the user what they actually want.**
+
+### FORBIDDEN ACTIONS (will waste time and anger the user)
+
+- Debugging "self-hosting" unless user explicitly requests it
+- Discussing Forth philosophy, Chuck Moore, threaded code, or "purity"
+- Adding features to make INTERPRET/EVALUATE work at runtime
+- Refactoring for "cleanliness" that doesn't improve speed
+- Writing code without being asked to write code
+- Running test suites without being asked
+- "Investigating" or "exploring" without explicit direction
+
+### THE ONLY VALID WORK
+
+1. **Improving compile speed** - measured in wall-clock time vs GCC -O2
+2. **Improving runtime speed** - measured in benchmarks vs GCC -O2 output
+3. **What the user explicitly asks for**
+
+### IF YOU CATCH YOURSELF
+
+- Typing "let me investigate" → STOP. Ask user what they want.
+- Typing "let me debug" → STOP. Ask user what they want.
+- Typing "let me check if" → STOP. Ask user what they want.
+- Discussing architecture → STOP. Is this about speed? If not, stop.
+- Running commands the user didn't ask for → STOP.
+
+### WHY THIS EXISTS
+
+A previous agent wrote this enforcement section, then IMMEDIATELY violated it by spending an hour debugging self-hosting memory corruption instead of asking what the user wanted. The user was rightfully furious. Do not repeat this failure.
+
+---
+
+Everything below serves the primary purpose:
 - Inlining builtins → runtime speed
 - Constant folding → runtime speed
 - No interpretation overhead → compile speed + runtime speed
-- Self-hosting → delete C dependency, prove the compiler works
+- Self-hosting → delete C dependency (means to an end, not the goal)
 
-Do NOT get distracted by:
-- "Forth purity" or traditional Forth architecture
-- Making INTERPRET work for arbitrary runtime code
-- Chuck Moore's 133 words or threaded code models
-
-The C interpreter is scaffolding for bootstrap. Once sixth compiles sixth, C is deleted.
+The C interpreter is scaffolding. Once sixth compiles sixth, C is deleted.
 
 ## What Sixth Is
 
