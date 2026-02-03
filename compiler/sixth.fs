@@ -72,7 +72,7 @@ DATA-BASE 14608 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
 variable data-here  DATA-BASE 14608 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
-64 constant INIT-MAX
+256 constant INIT-MAX
 create init-buf INIT-MAX 24 * allot  \ (addr:8, value:8, size:8)
 variable init-count  0 init-count !
 : init-entry ( i -- addr ) 24 * init-buf + ;
@@ -115,7 +115,7 @@ create ct-stack 8 cells allot
 variable ct-depth  0 ct-depth !
 
 \ Word info table for double-pass (Pass 1 scan)
-64 constant INFO-MAX
+512 constant INFO-MAX
 \ info-buf entry (40 bytes):
 \   0-23:  name (24 bytes)
 \   24:    nargs (1 byte)
