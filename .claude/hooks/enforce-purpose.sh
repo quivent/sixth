@@ -2,10 +2,14 @@
 # Enforcement hook: Prevent unauthorized work on the compiler
 # The agent must get explicit user approval before modifying compiler code
 # or running compiler-related commands.
+#
+# Also injects a reminder of the PRIMARY PURPOSE into every tool call.
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
 TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input')
+
+REMINDER="REMINDER: PRIMARY PURPOSE is compile speed faster than GCC -O2, runtime at parity or better. Is this action serving that purpose? If not, did the user explicitly request it? If both NO, STOP and ask the user."
 
 # Extract relevant fields based on tool
 case "$TOOL_NAME" in
@@ -14,15 +18,25 @@ case "$TOOL_NAME" in
 
     # Block edits to compiler source without explicit approval
     if [[ "$FILE_PATH" == *"compiler/sixth.fs"* ]] || [[ "$FILE_PATH" == *"compiler/"*".fs" ]]; then
-      jq -n '{
+      jq -n --arg reminder "$REMINDER" '{
         "hookSpecificOutput": {
           "hookEventName": "PreToolUse",
           "permissionDecision": "ask",
-          "permissionDecisionReason": "ENFORCEMENT: Modifying compiler source requires explicit user approval. Does this change directly improve COMPILE SPEED or RUNTIME SPEED? If not, do not proceed."
+          "permissionDecisionReason": "ENFORCEMENT: Modifying compiler source requires explicit user approval. Does this change directly improve COMPILE SPEED or RUNTIME SPEED? If not, do not proceed.",
+          "additionalContext": $reminder
         }
       }'
       exit 0
     fi
+
+    # For non-compiler edits, still inject the reminder
+    jq -n --arg reminder "$REMINDER" '{
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "additionalContext": $reminder
+      }
+    }'
+    exit 0
     ;;
 
   Bash)
@@ -30,11 +44,12 @@ case "$TOOL_NAME" in
 
     # Block test suite runs without approval
     if [[ "$COMMAND" == *"test"* ]] && [[ "$COMMAND" == *"compiler"* ]]; then
-      jq -n '{
+      jq -n --arg reminder "$REMINDER" '{
         "hookSpecificOutput": {
           "hookEventName": "PreToolUse",
           "permissionDecision": "ask",
-          "permissionDecisionReason": "ENFORCEMENT: Running compiler tests requires explicit user request. Did the user ask for this?"
+          "permissionDecisionReason": "ENFORCEMENT: Running compiler tests requires explicit user request. Did the user ask for this?",
+          "additionalContext": $reminder
         }
       }'
       exit 0
@@ -42,17 +57,33 @@ case "$TOOL_NAME" in
 
     # Block self-hosting attempts without approval
     if [[ "$COMMAND" == *"sixth"* ]] && [[ "$COMMAND" == *"sixth.fs"* ]] && [[ "$COMMAND" == *"sixth.fs"*"sixth.fs"* ]]; then
-      jq -n '{
+      jq -n --arg reminder "$REMINDER" '{
         "hookSpecificOutput": {
           "hookEventName": "PreToolUse",
           "permissionDecision": "ask",
-          "permissionDecisionReason": "ENFORCEMENT: Self-hosting attempts require explicit user request. Did the user ask to work on self-hosting?"
+          "permissionDecisionReason": "ENFORCEMENT: Self-hosting attempts require explicit user request. Did the user ask to work on self-hosting?",
+          "additionalContext": $reminder
         }
       }'
       exit 0
     fi
+
+    # For other bash commands, still inject the reminder
+    jq -n --arg reminder "$REMINDER" '{
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "additionalContext": $reminder
+      }
+    }'
+    exit 0
     ;;
 esac
 
-# Allow everything else
+# Default: inject reminder
+jq -n --arg reminder "$REMINDER" '{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "additionalContext": $reminder
+  }
+}'
 exit 0

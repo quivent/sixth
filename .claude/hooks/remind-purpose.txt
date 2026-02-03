@@ -1,0 +1,17 @@
+STOP. Before proceeding, verify:
+
+PRIMARY PURPOSE: Compile faster than GCC -O2. Run as fast or faster.
+
+1. Does this action directly improve COMPILE SPEED or RUNTIME SPEED?
+2. Did the user EXPLICITLY request this action?
+
+If BOTH are NO: Do not proceed. Ask the user what they want.
+
+FORBIDDEN without explicit request:
+- Debugging self-hosting
+- Running test suites
+- "Investigating" or "exploring"
+- Refactoring for cleanliness
+- Discussing Forth philosophy
+
+You are here to make the compiler FAST. Nothing else matters unless the user asks.
