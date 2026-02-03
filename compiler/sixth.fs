@@ -116,7 +116,16 @@ variable ct-depth  0 ct-depth !
 
 \ Word info table for double-pass (Pass 1 scan)
 64 constant INFO-MAX
-create info-buf INFO-MAX 32 * allot   \ 24 name + 4 nargs + 4 flags
+\ info-buf entry (40 bytes):
+\   0-23:  name (24 bytes)
+\   24:    nargs (1 byte)
+\   25:    rets (1 byte)
+\   26-27: flags (2 bytes) - bit0=recursive, bit1=has-io
+\   28-29: call-count (2 bytes)
+\   30-33: body-pos (4 bytes) - source position where body starts
+\   34-37: code-addr (4 bytes) - code offset, filled when compiled (0 = not compiled)
+\   38-39: padding
+create info-buf INFO-MAX 40 * allot
 variable info-count  0 info-count !
 
 \ ============================================================
@@ -2907,7 +2916,7 @@ variable num-neg
 \ generate wrong register save/restore code.
 \ Tests: 1030-fwd-ref-simple through 1033-fwd-ref-nargs, 1048-fwd-ref-void
 
-: info-entry ( i -- addr ) 32 * info-buf + ;
+: info-entry ( i -- addr ) 40 * info-buf + ;
 : info-name= ( addr u entry -- flag )
   >r dup 23 > if 2drop r> drop false exit then
   r@ over + c@ 0 <> if r> drop 2drop false exit then
@@ -2981,21 +2990,29 @@ variable scan-io
     2dup $u. str= if 1 scan-io ! then
     2dup $key str= if 1 scan-io ! then
     2dup $type str= if 1 scan-io ! then
+    \ Increment call-count for referenced words (if already in info-buf)
+    2dup info-find ?dup if
+      28 + dup c@ 1+ 255 min swap c!   \ increment call-count (max 255)
+    then
     2drop
   again ;
 
 create scan-name-buf 24 allot
 variable scan-name-len
+variable scan-body-pos
 
 : scan-add-info ( -- )
   info-count @ INFO-MAX >= if exit then
   info-count @ info-entry >r
-  r@ 24 0 fill
+  r@ 40 0 fill                                     \ clear entire entry
   scan-name-buf r@ scan-name-len @ dup 23 > if drop 23 then move
-  scan-nargs @ 1 max r@ 24 + !
-  scan-io @ 1 lshift
-  scan-void @ 0= if 4 or then
-  r> 28 + !
+  scan-nargs @ 1 max r@ 24 + c!                    \ nargs at 24 (1 byte)
+  scan-void @ 0= if 1 else 0 then r@ 25 + c!       \ rets at 25 (1 byte)
+  scan-io @ r@ 26 + c!                             \ flags at 26 (1 byte)
+  \ call-count at 28 (2 bytes) - already 0 from fill
+  scan-body-pos @ r@ 30 + !                        \ body-pos at 30 (4 bytes)
+  \ code-addr at 34 (4 bytes) - already 0 from fill, set when compiled
+  r> drop
   1 info-count +! ;
 
 : scan-all ( -- )
@@ -3011,6 +3028,7 @@ variable scan-name-len
       scan-name-buf swap move
       1 scan-void !  1 scan-nargs !  0 scan-io !
       scan-stack-comment
+      input-pos @ scan-body-pos !                  \ save body start position
       scan-body-io
       scan-add-info
     else
@@ -3050,8 +3068,8 @@ variable scan-name-len
   \ Forward reference — not yet defined
   flush-swap ct-flush
   2dup info-find ?dup if
-    dup 24 + @ call-nargs !
-    1 call-rets !
+    dup 24 + c@ call-nargs !
+    dup 25 + c@ dup 0= if drop 1 then call-rets !
     drop
   else
     1 call-nargs !  1 call-rets !
@@ -3110,7 +3128,10 @@ variable ret-count 1 ret-count !
 
 : start-def ( addr u -- )
   0 ct-depth !
-  dict-add
+  2dup dict-add
+  \ Store code-addr in info-buf if word exists there
+  2dup info-find ?dup if 34 + code-here swap ! then
+  2drop
   code-here current-word-addr !
   0 has-io !
   0 is-void !

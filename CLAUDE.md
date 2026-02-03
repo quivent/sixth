@@ -51,6 +51,148 @@ Everything below serves the primary purpose:
 
 The C interpreter is scaffolding. Once sixth compiles sixth, C is deleted.
 
+## Compiler Architecture: Two-Pass
+
+**No dictionary. Only inlining.**
+
+The compiler uses two-pass compilation to enable whole-program optimization:
+
+- **Pass 1 (scan-all):** Gather all word definitions, build call graph
+- **Pass 2 (compile):** Generate code with full program knowledge
+
+Two-pass gives you full program knowledge before code generation:
+
+```
+┌──────────────────────────────────┬──────┬──────────────────────────┐
+│       Future Optimization        │ Hash │         Two-Pass         │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Dead code elimination            │ ❌   │ ✅ know what's called    │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Smart inlining                   │ ❌   │ ✅ know call graph       │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Tail call optimization           │ ❌   │ ✅ know tail positions   │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Cross-word constant prop         │ ❌   │ ✅ know all values       │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Register allocation across calls │ ❌   │ ✅ know callee needs     │
+├──────────────────────────────────┼──────┼──────────────────────────┤
+│ Code size control                │ ❌   │ ✅ decide inline vs call │
+└──────────────────────────────────┴──────┴──────────────────────────┘
+```
+
+Hash lookup is just a speedup of the same architecture. Two-pass enables optimizations that hash cannot.
+
+This is how real optimizing compilers work. GCC doesn't emit code as it parses.
+
+### Implementation Plan (Worklog)
+
+**Goal: Runtime speed via inlining user words**
+
+Inlining small user words is the key win:
+- Eliminates call overhead
+- Enables constant folding across word boundaries
+- Dead code elimination after inlining
+- Register values stay live (no caller-save)
+
+Call-count tracking is the critical enabler. Know how many times each word is called → decide inline vs call.
+
+---
+
+**Step 1: Extend info-buf entry** ✅
+```forth
+\ Changed from 32 to 36 bytes per entry
+\ Updated: info-buf allot, info-entry, scan-add-info (c! for fields), compile-token (c@)
+```
+Status: DONE - tests pass (same 8 wrong, 1 rfail as before)
+
+---
+
+**Step 2: Store body position in scan-all** ✅
+```forth
+\ Added scan-body-pos variable
+\ Store input-pos after scan-stack-comment in scan-all
+\ Write scan-body-pos @ to offset 30 in scan-add-info
+```
+Status: DONE - tests pass (same 8 wrong, 1 rfail)
+
+---
+
+**Step 3: Add call-count tracking** ✅
+```forth
+\ In scan-body-io, after I/O checks:
+\   2dup info-find ?dup if
+\     28 + dup c@ 1+ 255 min swap c!  \ increment (max 255)
+\   then
+\ Note: only counts backward refs (word must be in info-buf already)
+```
+Status: DONE - tests pass (same 8 wrong, 1 rfail)
+
+---
+
+**Step 4: Name→index lookup** ⬜
+
+Issue: Still need name→index. Options:
+- A) Hash table for name→index (adds ~20 lines)
+- B) Linear search info-buf (current, O(n))
+- C) Sort info-buf + binary search
+
+Decision: **B for now.** Linear search is fine for <500 words. Optimize later if profiling shows it matters. Runtime speed > compile speed.
+
+Status: NOT STARTED
+
+---
+
+**Step 5: Inline decision in compile-token** ⬜
+```forth
+\ After info lookup, decide inline vs call:
+\   dup 28 + w@ 1 =           \ called exactly once?
+\   over 26 + w@ $1 and 0= and  \ not recursive?
+\   if
+\     inline-word
+\   else
+\     gen-call
+\   then
+```
+Status: NOT STARTED
+
+---
+
+**Step 6: Implement inline-word** ⬜
+```forth
+: inline-word ( info-entry -- )
+  \ Save current input state
+  input-pos @ >r  input-len @ >r
+  \ Jump to body position
+  dup 30 + @ input-pos !
+  \ Compile body until ;
+  begin
+    get-token dup 0= if 2drop r> input-len ! r> input-pos ! exit then
+    2dup s" ;" str= if 2drop r> input-len ! r> input-pos ! exit then
+    compile-token
+  again ;
+```
+Status: NOT STARTED
+
+---
+
+**Step 7: Delete dict-buf (cleanup)** ⬜
+
+Only after steps 1-6 work. Remove dead code:
+- dict-buf, dict-count, dict-entry
+- dict-add, dict-find, dict-name=, dict-flags, dict-addr
+
+Status: NOT STARTED
+
+---
+
+### Verification
+
+After EACH step:
+```bash
+./compiler/tests/test
+```
+All tests must pass. If not, fix before proceeding.
+
 ## What Sixth Is
 
 Sixth is a native x86-64 compiler for a Forth-like language. It compiles source directly to ELF binaries with no runtime interpreter. Built on Fifth, its predecessor.
