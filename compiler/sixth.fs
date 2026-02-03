@@ -258,16 +258,14 @@ variable fixup-target  0 fixup-target !
 : push-tos ( -- )
   stack-depth @
   dup 3 >= if
-    $49 c, $83 c, $ef c, 8 c,
-    $49 c, $89 c, $0f c,
+    $49 c, $83 c, $ef c, 8 c,       \ sub r15, 8
+    $49 c, $89 c, $0f c,            \ mov [r15], rcx
   then
   dup 2 >= if
-    $48 c, $89 c, $d9 c,
-  then
-  dup 1 >= if
-    $48 c, $89 c, $c3 c,
+    $48 c, $89 c, $d9 c,            \ mov rcx, rbx
   then
   drop
+  $48 c, $89 c, $c3 c,              \ mov rbx, rax
   1 stack-depth +! ;
 
 : pop-tos ( -- )
@@ -1257,8 +1255,16 @@ variable call-rets   1 call-rets !
   code-here 4 + - d,
   stack-depth @ 2 >= call-nargs @ 2 < and if $5b c, then
   stack-depth @ 3 >= call-nargs @ 3 < and if $59 c, then
-  \ Adjust stack-depth based on call signature: add (rets - nargs)
-  call-rets @ call-nargs @ - stack-depth +! ;
+  call-nargs @ 2 = call-rets @ 1 = and if
+    stack-depth @ 3 >= if
+      $48 c, $89 c, $cb c,                  \ mov rbx, rcx
+      stack-depth @ 4 >= if
+        $49 c, $8b c, $0f c,                \ mov rcx, [r15]
+        $49 c, $83 c, $c7 c, 8 c,           \ add r15, 8
+      then
+    then
+    -1 stack-depth +!
+  then ;
 
 : gen-ret ( -- )
   do-depth @ 0 ?do
