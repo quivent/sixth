@@ -11,8 +11,8 @@
 \ BUFFERS
 \ ============================================================
 
-4096 constant CODE-SIZE
-256 constant DICT-SIZE
+262144 constant CODE-SIZE   \ 256KB for self-hosting
+512 constant DICT-SIZE      \ 512 dictionary entries
 150000 constant INPUT-SIZE
 
 create code-buf CODE-SIZE allot
@@ -1405,6 +1405,11 @@ variable call-rets   1 call-rets !
   $e9 c, 0 d,                    \ jmp rel32 (placeholder)
   code-here do-depth @ 1- cells do-leave + ! ;  \ save patch addr
 
+: gen-unloop ( -- )
+  \ Remove DO..LOOP params from return stack (for early EXIT)
+  $41 c, $5d c,                  \ pop r13
+  $41 c, $5c c, ;                \ pop r12
+
 \ ============================================================
 \ RECURSE
 \ ============================================================
@@ -1688,6 +1693,38 @@ variable start-jmp
   $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1 on error)
   \ Stack result: rbx=fileid, rax=ior
   \ Consumed 3 (addr u fam), produced 2 (fileid ior) = net -1
+  -1 stack-depth +!
+  ;
+
+: gen-create-file ( -- )
+  \ ( addr u fam -- fileid ior )
+  \ Like open-file but with O_CREAT | O_TRUNC added to flags
+  1 has-io !
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
+  else
+    $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
+    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
+  then
+  \ rsi=addr, rbx=len, rax=fam
+  $50 c,                                    \ push rax (save fam)
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
+  $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
+  $f3 c, $a4 c,                            \ rep movsb
+  $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0
+  $58 c,                                    \ pop rax (fam)
+  $48 c, $0d c, 576 d,                     \ or rax, O_CREAT|O_TRUNC (64|512)
+  $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
+  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
+  $ba c, 420 d,                            \ mov edx, 0644
+  $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
+  $0f c, $05 c,                            \ syscall
+  $48 c, $89 c, $c3 c,                     \ mov rbx, rax
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax
+  $48 c, $85 c, $db c,                     \ test rbx, rbx
+  $79 c, 6 c,                              \ jns +6
+  $48 c, $31 c, $db c,                     \ xor rbx, rbx
+  $48 c, $ff c, $c8 c,                     \ dec rax
   -1 stack-depth +!
   ;
 
@@ -2153,6 +2190,13 @@ variable rt-parse-addr  0 rt-parse-addr !
   $49 c, $bf c, $800000 $100000 + q,            \ mov r15, 0x900000
   gen-quit ;
 
+: gen-throw ( -- )
+  \ ( n -- ) Exit with code n (simplified THROW for bootstrapping)
+  $48 c, $89 c, $c7 c,                          \ mov rdi, rax
+  $b8 c, 60 d,                                  \ mov eax, 60 (exit syscall)
+  $0f c, $05 c,                                 \ syscall
+  -1 stack-depth +! ;
+
 : gen-include ( -- )
   \ Parse filename, slurp file, evaluate contents
   1 has-io !
@@ -2260,6 +2304,7 @@ s" +loop" s, 2constant $+loop
 s" i" s, 2constant $i
 s" j" s, 2constant $j
 s" leave" s, 2constant $leave
+s" unloop" s, 2constant $unloop
 s" within" s, 2constant $within
 s" count" s, 2constant $count
 s" recurse" s, 2constant $recurse
@@ -2312,6 +2357,8 @@ s" #>" s, 2constant $#>
 s" c," s, 2constant $c,
 s" key" s, 2constant $key
 s" bl" s, 2constant $bl
+s" true" s, 2constant $true
+s" false" s, 2constant $false
 s" decimal" s, 2constant $decimal
 s" chars" s, 2constant $chars
 s" char+" s, 2constant $char+
@@ -2343,6 +2390,7 @@ s" interpret" s, 2constant $interpret
 s" evaluate" s, 2constant $evaluate
 s" quit" s, 2constant $quit
 s" abort" s, 2constant $abort
+s" throw" s, 2constant $throw
 s" include" s, 2constant $include
 s" r/o" s, 2constant $r/o
 s" w/o" s, 2constant $w/o
@@ -2350,6 +2398,7 @@ s" r/w" s, 2constant $r/w
 s" argc" s, 2constant $argc
 s" argv" s, 2constant $argv
 s" open-file" s, 2constant $open-file
+s" create-file" s, 2constant $create-file
 s" close-file" s, 2constant $close-file
 s" read-file" s, 2constant $read-file
 s" write-file" s, 2constant $write-file
@@ -2670,6 +2719,8 @@ variable num-neg
   2dup $cells str= if 2drop flush-swap ct-flush gen-cells true exit then
   2dup $cell+ str= if 2drop flush-swap ct-flush gen-cell+ true exit then
   2dup $bl str= if 2drop flush-swap 32 ct-push true exit then
+  2dup $true str= if 2drop flush-swap -1 ct-push true exit then
+  2dup $false str= if 2drop flush-swap 0 ct-push true exit then
   2dup $chars str= if 2drop true exit then   \ nop on byte-addressed machine
   2dup $char+ str= if 2drop flush-swap
     ct-depth @ 0> if ct-pop 1+ ct-push else gen-1+ then true exit then
@@ -2694,6 +2745,7 @@ variable num-neg
   2dup $w/o str= if 2drop flush-swap ct-flush gen-w/o true exit then
   2dup $r/w str= if 2drop flush-swap ct-flush gen-r/w true exit then
   2dup $open-file str= if 2drop flush-swap ct-flush flush-pending gen-open-file true exit then
+  2dup $create-file str= if 2drop flush-swap ct-flush flush-pending gen-create-file true exit then
   2dup $close-file str= if 2drop flush-swap ct-flush flush-pending gen-close-file true exit then
   2dup $read-file str= if 2drop flush-swap ct-flush flush-pending gen-read-file true exit then
   2dup $write-file str= if 2drop flush-swap ct-flush flush-pending gen-write-file true exit then
@@ -2734,6 +2786,7 @@ variable num-neg
   2dup $evaluate str= if 2drop flush-swap ct-flush flush-pending gen-evaluate true exit then
   2dup $quit str= if 2drop flush-swap ct-flush gen-quit true exit then
   2dup $abort str= if 2drop flush-swap ct-flush gen-abort true exit then
+  2dup $throw str= if 2drop flush-swap ct-flush flush-pending gen-throw true exit then
   2dup $[ str= if 2drop flush-swap ct-flush 0 state ! true exit then
   2dup $] str= if 2drop 1 state ! true exit then
   2dup $literal str= if 2drop interp-val @ ct-push true exit then
@@ -2816,6 +2869,7 @@ variable num-neg
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
   2dup $j str= if 2drop flush-swap ct-flush gen-j true exit then
   2dup $leave str= if 2drop flush-swap ct-flush gen-leave true exit then
+  2dup $unloop str= if 2drop flush-swap ct-flush gen-unloop true exit then
   2dup $within str= if 2drop flush-swap ct-flush flush-pending gen-within true exit then
   2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
   2dup $recursive str= if 2drop 1 is-recursive ! true exit then
@@ -3164,10 +3218,14 @@ create inc-input 8192 allot
   else
     \ Handle ! in interpret mode: ( val addr -- ) record as init
     2dup $! str= if
-      2drop
-      interp-val2 @ interp-val @ 8 add-init
-      exit
+      2drop interp-val2 @ interp-val @ 8 add-init exit
     then
+    \ Interpret-mode arithmetic
+    2dup $+ str= if 2drop interp-val2 @ interp-val @ + interp-val ! exit then
+    2dup $- str= if 2drop interp-val2 @ interp-val @ - interp-val ! exit then
+    2dup $* str= if 2drop interp-val2 @ interp-val @ * interp-val ! exit then
+    2dup $/ str= if 2drop interp-val2 @ interp-val @ / interp-val ! exit then
+    2dup $cells str= if 2drop interp-val @ 8 * interp-val ! exit then
     2dup parse-number if nip nip interp-val @ interp-val2 ! interp-val ! else
       \ Try dictionary lookup for constants
       2dup dict-find ?dup if
