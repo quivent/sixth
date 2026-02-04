@@ -26,8 +26,10 @@
     then then
   until
   \ Patch jmp to skip string data
-  code-here r> tuck -              \ ( len patch-addr displacement )
-  swap 4 - code-buf + d!           \ write displacement
+  \ patch-addr points to the 4-byte displacement field (after jmp opcode)
+  \ displacement = current-pos - (patch-addr + 4) = current-pos - patch-addr - 4
+  code-here r> tuck - 4 -          \ ( len patch-addr displacement )
+  swap code-buf + d!               \ write displacement at patch-addr
   \ Calculate runtime address: 0x4000b0 + code-offset
   swap $4000B0 + swap              \ ( runtime-addr len )
   \ Generate code to push addr and len

@@ -226,9 +226,31 @@
   over 0= if
     \ [base]
     over 7 and 5 = if
-      modrm-mr8 c, drop 0 c,
+      nip modrm-mr8 c, 0 c,
     else
-      modrm-mr c, drop
+      nip modrm-mr c,
+    then
+  else over dup -128 >= swap 127 <= and if
+    \ [base+disp8]
+    modrm-mr8 c, c,
+  else
+    \ [base+disp32]
+    modrm-mr32 c, d,
+  then then ;
+
+: add-mr ( src offset base -- )
+  \ ADD [base+offset], src  (memory += register)
+  over 8 >= 2 pick 8 >= or if
+    over 8 >= if $49 else $48 then
+    2 pick 8 >= if 4 or then c,
+  else rex.w then
+  $01 c,
+  over 0= if
+    \ [base]
+    over 7 and 5 = if
+      >r nip r> modrm-mr8 c, 0 c,
+    else
+      >r nip r> modrm-mr c,
     then
   else over dup -128 >= swap 127 <= and if
     \ [base+disp8]
@@ -254,7 +276,7 @@
   \ MOV byte [base+offset], src (low 8 bits)
   $88 c,
   over 0= if
-    over 7 and 5 = if modrm-mr8 c, drop 0 c, else modrm-mr c, drop then
+    over 7 and 5 = if nip modrm-mr8 c, 0 c, else nip modrm-mr c, then
   else over dup -128 >= swap 127 <= and if
     modrm-mr8 c, c,
   else

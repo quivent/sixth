@@ -132,16 +132,57 @@ variable cf-sp  0 cf-sp !
 \ ============================================================
 \ Uses return stack for loop control
 
+\ ============================================================
+\ LEAVE STACK
+\ ============================================================
+\ Separate from cf-stack because LEAVE needs to collect multiple
+\ forward references that all get patched at LOOP/+LOOP time.
+\ We use a simple stack with markers to support nested loops.
+
+create leave-stack 64 cells allot
+variable leave-sp  0 leave-sp !
+
+: leave-push ( addr -- ) leave-stack leave-sp @ cells + ! 1 leave-sp +! ;
+: leave-pop ( -- addr ) -1 leave-sp +! leave-stack leave-sp @ cells + @ ;
+: leave-mark ( -- ) -1 leave-push ;  \ Push marker for this loop level
+: leave-patch ( -- )
+  \ Patch all LEAVE jumps since last marker (or stack empty)
+  begin
+    leave-sp @ 0> while
+    leave-pop dup -1 = if drop exit then  \ Hit marker, done
+    code-here swap patch-rel32
+  repeat ;
+
 : gen-do ( -- do-addr leave-addr )
   \ ( limit index -- ) R: ( -- limit index )
   \ Push limit and index to return stack
   \ sub rbp, 16; mov [rbp+8], rbx; mov [rbp], rax; pop both
+  leave-mark                           \ Mark leave stack for this loop
   $48 c, $83 c, $ed c, 16 c,     \ sub rbp, 16
   $48 c, $89 c, $5d c, 8 c,      \ mov [rbp+8], rbx (limit)
   $48 c, $89 c, $45 c, 0 c,      \ mov [rbp], rax (index)
   pop-val pop-val
   code-here                      \ do-addr (loop target)
-  0 ;                            \ leave-addr placeholder
+  0 ;                            \ leave-addr placeholder (unused but kept for compat)
+
+: gen-?do ( -- do-addr leave-addr )
+  \ ( limit index -- ) R: ( -- limit index )
+  \ Like DO but skip if limit=index
+  leave-mark                           \ Mark leave stack for this loop
+  \ Compare limit and index first
+  $48 c, $39 c, $c3 c,           \ cmp rbx, rax (limit vs index)
+  $0f c, $84 c,                  \ je rel32 (skip if equal)
+  0 d,
+  code-here                      \ save je patch address
+  >r                             \ stash for later
+  \ Push limit and index to return stack
+  $48 c, $83 c, $ed c, 16 c,     \ sub rbp, 16
+  $48 c, $89 c, $5d c, 8 c,      \ mov [rbp+8], rbx (limit)
+  $48 c, $89 c, $45 c, 0 c,      \ mov [rbp], rax (index)
+  pop-val pop-val
+  code-here                      \ do-addr (loop target)
+  r>                             \ leave-addr = je patch address
+  ;
 
 : gen-loop ( do-addr leave-addr -- )
   \ Increment index, compare to limit, loop or exit
@@ -153,7 +194,33 @@ variable cf-sp  0 cf-sp !
   swap code-here 4 + - d,        \ backward to do-addr
   \ Clean up return stack
   $48 c, $83 c, $c5 c, 16 c,     \ add rbp, 16
-  drop ;                         \ discard leave-addr
+  \ Patch leave-addr if non-zero (from ?do)
+  ?dup if code-here swap patch-rel32 then
+  \ Patch all LEAVE jumps
+  leave-patch ;
+
+: gen-+loop ( do-addr leave-addr -- )
+  \ Add TOS to index, compare to limit, loop or exit
+  \ add [rbp], rax; pop; compare; branch
+  $48 c, $01 c, $45 c, 0 c,      \ add qword [rbp], rax (add increment)
+  pop-val
+  $48 c, $8b c, $45 c, 0 c,      \ mov rax, [rbp] (index)
+  $48 c, $3b c, $45 c, 8 c,      \ cmp rax, [rbp+8] (limit)
+  $0f c, $8c c,                  \ jl rel32
+  swap code-here 4 + - d,        \ backward to do-addr
+  \ Clean up return stack
+  $48 c, $83 c, $c5 c, 16 c,     \ add rbp, 16
+  \ Patch leave-addr if non-zero (from ?do)
+  ?dup if code-here swap patch-rel32 then
+  \ Patch all LEAVE jumps
+  leave-patch ;
+
+: gen-leave ( -- )
+  \ Exit loop early: clean up rstack, jump to end
+  $48 c, $83 c, $c5 c, 16 c,     \ add rbp, 16 (unloop)
+  $e9 c,                         \ jmp rel32
+  0 d,                           \ placeholder
+  code-here leave-push ;         \ save for patching
 
 : gen-i ( -- )
   \ Push current loop index

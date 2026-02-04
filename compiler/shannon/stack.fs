@@ -27,6 +27,7 @@ variable dead-code    0 dead-code !    \ 1 = after unconditional exit, skip dept
 : tos ( -- reg ) RAX ;      \ Current TOS register
 : nos ( -- reg ) RBX ;      \ Current NOS register
 : third ( -- reg ) RCX ;    \ Current 3rd register
+: fourth ( -- reg ) R14 ;   \ Current 4th register
 : stkptr ( -- reg ) R15 ;   \ Memory stack pointer
 
 \ ============================================================
