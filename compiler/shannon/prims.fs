@@ -225,6 +225,14 @@
   stack-depth@ 2 >= if 0 stkptr nos mov-rm  8 stkptr add-ri8 then
   stack-depth@ 3 >= if 0 stkptr third mov-rm  8 stkptr add-ri8 then ;
 
+: emit-/string ( -- )
+  \ ( addr u n -- addr+n u-n )
+  \ TOS=n (rax), NOS=u (rbx), 3rd=addr (rcx)
+  \ Result: TOS=u-n, NOS=addr+n
+  tos third add-rr          \ addr = addr + n (rcx = rcx + rax)
+  tos nos sub-rr            \ u = u - n (rbx = rbx - rax)
+  pop-val ;                 \ drop n, TOS=u-n, NOS=addr+n
+
 \ ============================================================
 \ BITWISE
 \ ============================================================

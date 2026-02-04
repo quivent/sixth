@@ -169,17 +169,13 @@
 : gen-create-file ( -- )
   \ ( addr u fam -- fileid ior )
   \ fam in rax, u in rbx, addr in rcx (if stack-depth>=3) or [r15]
-  ." DBG: gen-create-file start, depth=" stack-depth @ . cr
   \ Get addr into rsi (handle register vs memory stack)
   stack-depth @ 3 >= if
-    ." DBG: using rcx" cr
     $48 c, $89 c, $ce c,              \ mov rsi, rcx (addr from 3rd reg)
   else
-    ." DBG: using [r15]" cr
     $49 c, $8b c, $37 c,              \ mov rsi, [r15] (addr from memory)
     $49 c, $83 c, $c7 c, 8 c,         \ add r15, 8
   then
-  ." DBG: past conditional" cr
   $50 c,                              \ push rax (save fam)
   \ Copy string: rsi=src addr, rbx=len, rdi=dest
   $48 c, $bf c, rt-word-buf q,        \ mov rdi, rt-word-buf

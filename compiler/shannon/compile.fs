@@ -384,6 +384,9 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 : compile-move ( -- )
   flush-all emit-move ;
 
+: compile-/string ( -- )
+  flush-all emit-/string ;
+
 \ ============================================================
 \ CONTROL FLOW SUPPORT
 \ ============================================================
@@ -500,6 +503,7 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" +!" str= if 2drop compile-+! true exit then
   2dup s" fill" str= if 2drop compile-fill true exit then
   2dup s" move" str= if 2drop compile-move true exit then
+  2dup s" /string" str= if 2drop compile-/string true exit then
   2drop false ;
 
 \ ============================================================
