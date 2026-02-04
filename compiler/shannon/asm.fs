@@ -238,6 +238,28 @@
     modrm-mr32 c, d,
   then then ;
 
+: add-mr ( src offset base -- )
+  \ ADD [base+offset], src  (memory += register)
+  over 8 >= 2 pick 8 >= or if
+    over 8 >= if $49 else $48 then
+    2 pick 8 >= if 4 or then c,
+  else rex.w then
+  $01 c,
+  over 0= if
+    \ [base]
+    over 7 and 5 = if
+      >r nip r> swap modrm-mr8 c, 0 c,
+    else
+      >r nip r> swap modrm-mr c,
+    then
+  else over dup -128 >= swap 127 <= and if
+    \ [base+disp8]
+    modrm-mr8 c, c,
+  else
+    \ [base+disp32]
+    modrm-mr32 c, d,
+  then then ;
+
 \ Byte variants
 : movzx-rm8 ( offset base dst -- )
   \ MOVZX dst, byte [base+offset]

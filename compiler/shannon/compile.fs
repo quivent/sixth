@@ -113,6 +113,70 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
     flush-pending emit-mul
   then then ;
 
+: compile-/ ( -- )
+  \ ( x y -- x/y ) non-commutative division
+  flush-cmp flush-swap
+  ct-depth@ 2 >= if
+    fold-div
+  else
+    flush-pending emit-/
+  then ;
+
+: compile-mod ( -- )
+  \ ( n d -- n mod d ) modulo
+  flush-cmp flush-swap
+  ct-depth@ 2 >= if
+    fold-mod
+  else
+    flush-pending emit-mod
+  then ;
+
+: compile-/mod ( -- )
+  \ ( n d -- rem quot ) combined division
+  flush-all emit-/mod ;
+
+: compile-lshift ( -- )
+  \ ( x n -- x<<n ) left shift
+  flush-cmp flush-swap
+  ct-depth@ 2 >= if
+    fold-lshift
+  else ct-depth@ 1 = if
+    flush-pending fuse-lshift
+  else
+    flush-pending emit-lshift
+  then then ;
+
+: compile-rshift ( -- )
+  \ ( x n -- x>>n ) logical right shift
+  flush-cmp flush-swap
+  ct-depth@ 2 >= if
+    fold-rshift
+  else ct-depth@ 1 = if
+    flush-pending fuse-rshift
+  else
+    flush-pending emit-rshift
+  then then ;
+
+: compile-min ( -- )
+  \ ( a b -- min ) signed minimum, commutative
+  flush-cmp
+  ct-depth@ 0= if clear-swap else flush-swap then
+  ct-depth@ 2 >= if
+    ct-pop ct-pop min ct-push
+  else
+    flush-pending emit-min
+  then ;
+
+: compile-max ( -- )
+  \ ( a b -- max ) signed maximum, commutative
+  flush-cmp
+  ct-depth@ 0= if clear-swap else flush-swap then
+  ct-depth@ 2 >= if
+    ct-pop ct-pop max ct-push
+  else
+    flush-pending emit-max
+  then ;
+
 : compile-and ( -- )
   \ ( x y -- x&y ) commutative
   flush-cmp
@@ -196,6 +260,11 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   ct-depth@ 0> if fold-2/ else
   1 tos sar-ri then ;               \ sar rax, 1
 
+: compile-abs ( -- )
+  \ ( n -- |n| ) absolute value
+  flush-swap
+  ct-depth@ 0> if ct-pop abs ct-push else emit-abs then ;
+
 \ ============================================================
 \ STACK OPERATIONS
 \ ============================================================
@@ -234,6 +303,24 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 : compile-2drop ( -- )
   flush-all emit-2drop ;
 
+: compile-2swap ( -- )
+  flush-all emit-2swap ;
+
+: compile-2over ( -- )
+  flush-all emit-2over ;
+
+: compile--rot ( -- )
+  flush-all emit--rot ;
+
+: compile-?dup ( -- )
+  flush-all emit-?dup ;
+
+: compile-depth ( -- )
+  flush-all emit-depth ;
+
+: compile-pick ( -- )
+  flush-all emit-pick ;
+
 \ ============================================================
 \ COMPARISON OPERATIONS
 \ ============================================================
@@ -257,6 +344,21 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 : compile-0> ( -- )
   flush-all emit-0> ;
 
+: compile-<> ( -- )
+  flush-all emit-<> ;
+
+: compile-u< ( -- )
+  flush-all emit-u< ;
+
+: compile-0<> ( -- )
+  flush-all emit-0<> ;
+
+: compile-<= ( -- )
+  flush-all emit-<= ;
+
+: compile->= ( -- )
+  flush-all emit->= ;
+
 \ ============================================================
 \ MEMORY OPERATIONS
 \ ============================================================
@@ -272,6 +374,15 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 
 : compile-c! ( -- )
   flush-all emit-c! ;
+
+: compile-+! ( -- )
+  flush-all emit-+! ;
+
+: compile-fill ( -- )
+  flush-all emit-fill ;
+
+: compile-move ( -- )
+  flush-all emit-move ;
 
 \ ============================================================
 \ CONTROL FLOW SUPPORT
@@ -323,9 +434,16 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" +" str= if 2drop compile-+ true exit then
   2dup s" -" str= if 2drop compile-- true exit then
   2dup s" *" str= if 2drop compile-* true exit then
+  2dup s" /" str= if 2drop compile-/ true exit then
+  2dup s" mod" str= if 2drop compile-mod true exit then
+  2dup s" /mod" str= if 2drop compile-/mod true exit then
   2dup s" and" str= if 2drop compile-and true exit then
   2dup s" or" str= if 2drop compile-or true exit then
   2dup s" xor" str= if 2drop compile-xor true exit then
+  2dup s" lshift" str= if 2drop compile-lshift true exit then
+  2dup s" rshift" str= if 2drop compile-rshift true exit then
+  2dup s" min" str= if 2drop compile-min true exit then
+  2dup s" max" str= if 2drop compile-max true exit then
   2drop false ;
 
 : try-fold-unary ( addr u -- handled? )
@@ -336,6 +454,7 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" invert" str= if 2drop compile-invert true exit then
   2dup s" 2*" str= if 2drop compile-2* true exit then
   2dup s" 2/" str= if 2drop compile-2/ true exit then
+  2dup s" abs" str= if 2drop compile-abs true exit then
   2drop false ;
 
 : try-stack-op ( addr u -- handled? )
@@ -349,6 +468,12 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" tuck" str= if 2drop compile-tuck true exit then
   2dup s" 2dup" str= if 2drop compile-2dup true exit then
   2dup s" 2drop" str= if 2drop compile-2drop true exit then
+  2dup s" 2swap" str= if 2drop compile-2swap true exit then
+  2dup s" 2over" str= if 2drop compile-2over true exit then
+  2dup s" -rot" str= if 2drop compile--rot true exit then
+  2dup s" ?dup" str= if 2drop compile-?dup true exit then
+  2dup s" depth" str= if 2drop compile-depth true exit then
+  2dup s" pick" str= if 2drop compile-pick true exit then
   2drop false ;
 
 : try-compare ( addr u -- handled? )
@@ -359,6 +484,11 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" 0=" str= if 2drop compile-0= true exit then
   2dup s" 0<" str= if 2drop compile-0< true exit then
   2dup s" 0>" str= if 2drop compile-0> true exit then
+  2dup s" <>" str= if 2drop compile-<> true exit then
+  2dup s" u<" str= if 2drop compile-u< true exit then
+  2dup s" 0<>" str= if 2drop compile-0<> true exit then
+  2dup s" <=" str= if 2drop compile-<= true exit then
+  2dup s" >=" str= if 2drop compile->= true exit then
   2drop false ;
 
 : try-memory ( addr u -- handled? )
@@ -367,6 +497,9 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" !" str= if 2drop compile-! true exit then
   2dup s" c@" str= if 2drop compile-c@ true exit then
   2dup s" c!" str= if 2drop compile-c! true exit then
+  2dup s" +!" str= if 2drop compile-+! true exit then
+  2dup s" fill" str= if 2drop compile-fill true exit then
+  2dup s" move" str= if 2drop compile-move true exit then
   2drop false ;
 
 \ ============================================================
@@ -383,10 +516,13 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 : compile-while ( -- ) flush-all gen-if cf-push ;
 : compile-repeat ( -- ) cf-pop cf-pop gen-again gen-then ;
 : compile-do ( -- ) flush-all gen-do cf-push cf-push ;
+: compile-?do ( -- ) flush-all gen-?do cf-push cf-push ;
 : compile-loop ( -- ) cf-pop cf-pop gen-loop ;
+: compile-+loop ( -- ) flush-all cf-pop cf-pop gen-+loop ;
 : compile-i ( -- ) flush-all gen-i ;
 : compile-j ( -- ) flush-all gen-j ;
 : compile-unloop ( -- ) gen-unloop ;
+: compile-leave ( -- ) flush-all gen-leave ;
 
 \ Fused compare+branch
 : compile-0=if ( -- ) flush-all gen-0=if ;
@@ -405,10 +541,13 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" while" str= if 2drop compile-while true exit then
   2dup s" repeat" str= if 2drop compile-repeat true exit then
   2dup s" do" str= if 2drop compile-do true exit then
+  2dup s" ?do" str= if 2drop compile-?do true exit then
   2dup s" loop" str= if 2drop compile-loop true exit then
+  2dup s" +loop" str= if 2drop compile-+loop true exit then
   2dup s" i" str= if 2drop compile-i true exit then
   2dup s" j" str= if 2drop compile-j true exit then
   2dup s" unloop" str= if 2drop compile-unloop true exit then
+  2dup s" leave" str= if 2drop compile-leave true exit then
   \ Fused variants
   2dup s" 0=if" str= if 2drop compile-0=if true exit then
   2dup s" 0<if" str= if 2drop compile-0<if true exit then
@@ -447,6 +586,15 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 : compile-type ( -- ) flush-all gen-type ;
 : compile-dot ( -- ) flush-all gen-dot ;
 : compile-key ( -- ) flush-all gen-key ;
+: compile-write-file ( -- ) flush-all emit-write-file ;
+: compile-close-file ( -- ) flush-all emit-close-file ;
+: compile-argc ( -- ) flush-all emit-argc ;
+: compile-argv ( -- ) flush-all emit-argv ;
+: compile-slurp-file ( -- ) flush-all emit-slurp-file ;
+: compile-w/o ( -- ) flush-all emit-w/o ;
+: compile-r/o ( -- ) flush-all emit-r/o ;
+: compile-r/w ( -- ) flush-all emit-r/w ;
+: compile-create-file ( -- ) flush-all gen-create-file ;
 
 : try-io ( addr u -- handled? )
   2dup s" emit" str= if 2drop compile-emit true exit then
@@ -455,6 +603,15 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" type" str= if 2drop compile-type true exit then
   2dup s" ." str= if 2drop compile-dot true exit then
   2dup s" key" str= if 2drop compile-key true exit then
+  2dup s" write-file" str= if 2drop compile-write-file true exit then
+  2dup s" close-file" str= if 2drop compile-close-file true exit then
+  2dup s" argc" str= if 2drop compile-argc true exit then
+  2dup s" argv" str= if 2drop compile-argv true exit then
+  2dup s" slurp-file" str= if 2drop compile-slurp-file true exit then
+  2dup s" w/o" str= if 2drop compile-w/o true exit then
+  2dup s" r/o" str= if 2drop compile-r/o true exit then
+  2dup s" r/w" str= if 2drop compile-r/w true exit then
+  2dup s" create-file" str= if 2drop compile-create-file true exit then
   2drop false ;
 
 \ ============================================================
@@ -477,10 +634,52 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
 
 : compile-recurse ( -- ) flush-all gen-recurse ;
 : compile-exit ( -- ) flush-all ret ;
+: compile-throw ( -- ) flush-all emit-throw ;
+: compile-bye ( -- ) flush-all emit-bye ;
+
+: compile-tick ( -- )
+  \ ' at compile time: get next token, look up in dict, push code address as literal
+  get-token dup 0= if 2drop exit then
+  dict-find ?dup if
+    flush-all
+    dict-addr @ emit-lit           \ push the XT (code address)
+  else
+    ." ' unknown word" cr 1 throw
+  then ;
+
+: compile-execute ( -- )
+  \ execute: call the XT on TOS
+  flush-all
+  $ff c, $d0 c,                    \ call rax
+  pop-val ;
+
+: compile-literal ( -- )
+  \ literal: take value from ct-stack, compile as literal
+  ct-depth@ 0> if
+    ct-pop emit-lit
+  else
+    ." literal: nothing on compile-time stack" cr 1 throw
+  then ;
+
+: compile-bracket-tick ( -- )
+  \ ['] at compile time: identical to ' - get next token, look up, emit XT as literal
+  get-token dup 0= if 2drop exit then
+  dict-find ?dup if
+    flush-all
+    dict-addr @ emit-lit           \ push the XT (code address)
+  else
+    ." ['] unknown word" cr 1 throw
+  then ;
 
 : try-special ( addr u -- handled? )
   2dup s" recurse" str= if 2drop compile-recurse true exit then
   2dup s" exit" str= if 2drop compile-exit true exit then
+  2dup s" throw" str= if 2drop compile-throw true exit then
+  2dup s" bye" str= if 2drop compile-bye true exit then
+  2dup s" '" str= if 2drop compile-tick true exit then
+  2dup s" [']" str= if 2drop compile-bracket-tick true exit then
+  2dup s" execute" str= if 2drop compile-execute true exit then
+  2dup s" literal" str= if 2drop compile-literal true exit then
   2drop false ;
 
 \ ============================================================

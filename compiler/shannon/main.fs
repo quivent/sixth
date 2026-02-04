@@ -52,6 +52,10 @@ variable code-pos  0 code-pos !
 : >= ( a b -- flag ) < 0= ;
 : <= ( a b -- flag ) > 0= ;
 
+\ Standard Forth constants (needed for self-hosting)
+0 constant false
+-1 constant true
+
 \ ============================================================
 \ INPUT BUFFER INFRASTRUCTURE
 \ ============================================================
@@ -228,6 +232,13 @@ variable dict-count  0 dict-count !
 
 $800000 constant DATA-BASE
 
+\ Runtime addresses - defined early so prims.fs can use them
+DATA-BASE 4256 + constant rt-word-buf    \ 256-byte buffer for null-terminated paths
+262144 constant SLURP-SIZE               \ 256KB slurp buffer
+DATA-BASE 45312 + constant rt-argc
+DATA-BASE 45320 + constant rt-argv
+DATA-BASE 45328 + constant rt-slurp-buf  \ slurp-file buffer (SLURP-SIZE bytes)
+
 \ ============================================================
 \ LOAD SHANNON MODULES
 \ ============================================================
@@ -248,13 +259,6 @@ include compiler/shannon/elf.fs       \ ELF binary generation
 include compiler/shannon/defs.fs      \ Data definitions (variable, constant, create)
 include compiler/shannon/strings.fs   \ String literals (s", .")
 include compiler/shannon/compile.fs   \ Layer 4: compilation orchestration
-
-\ ============================================================
-\ RUNTIME ADDRESSES
-\ ============================================================
-
-DATA-BASE 45312 + constant rt-argc
-DATA-BASE 45320 + constant rt-argv
 
 \ ============================================================
 \ PROLOGUE/EPILOGUE GENERATION
@@ -365,11 +369,81 @@ variable start-jmp
     compile-token
   again ;
 
+\ ============================================================
+\ FILE I/O
+\ ============================================================
+
+: load-source ( addr u -- )
+  slurp-file
+  dup INPUT-SIZE > if
+    ." File too large" cr 1 throw
+  then
+  dup input-len !
+  input-buf swap move
+  0 input-pos ! ;
+
+\ ============================================================
+\ INCLUDE STACK (for nested includes)
+\ ============================================================
+\ Each level needs: input-buf copy (INPUT-SIZE), input-pos, input-len
+\ Support 8 levels of nesting (should be plenty)
+
+\ Forward reference for compile-all (needed for recursive include)
+variable 'compile-all  0 'compile-all !
+
+8 constant MAX-INCLUDE-DEPTH
+MAX-INCLUDE-DEPTH INPUT-SIZE * constant INCLUDE-STACK-SIZE
+create include-stack INCLUDE-STACK-SIZE allot
+create include-pos-stack MAX-INCLUDE-DEPTH cells allot
+create include-len-stack MAX-INCLUDE-DEPTH cells allot
+variable include-depth  0 include-depth !
+
+: include-push ( -- )
+  \ Save current input state to include stack
+  include-depth @ MAX-INCLUDE-DEPTH >= if
+    ." Include nesting too deep" cr 1 throw
+  then
+  \ Save input-buf contents
+  input-buf
+  include-stack include-depth @ INPUT-SIZE * +
+  input-len @ move
+  \ Save input-pos and input-len
+  input-pos @ include-pos-stack include-depth @ cells + !
+  input-len @ include-len-stack include-depth @ cells + !
+  1 include-depth +! ;
+
+: include-pop ( -- )
+  \ Restore previous input state from include stack
+  include-depth @ 0= if exit then
+  -1 include-depth +!
+  \ Restore input-buf contents
+  include-stack include-depth @ INPUT-SIZE * +
+  input-buf
+  include-len-stack include-depth @ cells + @
+  move
+  \ Restore input-pos and input-len
+  include-pos-stack include-depth @ cells + @ input-pos !
+  include-len-stack include-depth @ cells + @ input-len ! ;
+
+: compile-include ( -- )
+  \ Get filename token
+  get-token dup 0= if 2drop exit then
+  \ Save current input state
+  include-push
+  \ Load the new file (overwrites input-buf)
+  load-source
+  \ Process it with compile-all (via forward reference)
+  'compile-all @ execute
+  \ Restore previous input state
+  include-pop ;
+
 : compile-all ( -- )
   begin
     get-token dup 0= if 2drop exit then
     2dup s" :" str= if
       2drop compile-colon
+    else 2dup s" include" str= if
+      2drop compile-include
     else 2dup s" variable" str= if
       2drop compile-variable
     else 2dup s" constant" str= if
@@ -383,23 +457,25 @@ variable start-jmp
       2dup parse-number if
         nip nip ct-push
       else
-        2drop  \ Skip other tokens in pass 2
+        \ Check if it's a constant ($800 flag) - push its value
+        2dup dict-find ?dup if
+          dup dict-flags @ $FFFFFFFF and $800 and if
+            \ Get imm64 value from stub (offset +2 after 48 b8)
+            dict-addr @ $FFFFFFFF and 2 + code-buf + @
+            ct-push
+            2drop
+          else
+            drop 2drop  \ Not a constant, skip
+          then
+        else
+          2drop  \ Unknown token, skip
+        then
       then
-    then then then then then
+    then then then then then then
   again ;
 
-\ ============================================================
-\ FILE I/O
-\ ============================================================
-
-: load-source ( addr u -- )
-  slurp-file
-  dup INPUT-SIZE > if
-    ." File too large" cr 1 throw
-  then
-  dup input-len !
-  input-buf swap move
-  0 input-pos ! ;
+\ Initialize forward reference
+' compile-all 'compile-all !
 
 \ ============================================================
 \ MAIN ENTRY POINT
