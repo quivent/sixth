@@ -142,7 +142,6 @@ variable num-neg
       exit
     then
   again ;
-
 : skip-line ( -- )
   begin
     input-pos @ input-len @ >= if exit then
@@ -355,7 +354,8 @@ variable start-jmp
   then
   stack-depth !
   begin
-    get-token dup 0= if 2drop exit then
+    get-token
+    dup 0= if 2drop exit then
     2dup s" ;" str= if
       2drop
       flush-all
