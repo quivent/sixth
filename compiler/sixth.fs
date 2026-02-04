@@ -484,19 +484,7 @@ variable fixup-target  0 fixup-target !
   stack-depth @ 3 >= if $59 c, then       \ restore rcx
   stack-depth @ 2 >= if $5b c, then ;     \ restore rbx
 
-: gen-move ( -- )
-  \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
-  \ rsi/rdi are free (not used by stack machine)
-  stack-depth @ 3 >= if
-    $48 c, $89 c, $ce c,         \ mov rsi, rcx (src from 3rd reg)
-  else
-    $49 c, $8b c, $37 c,         \ mov rsi, [r15]
-    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
-  then
-  $48 c, $89 c, $df c,           \ mov rdi, rbx (dst)
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax (count)
-  $f3 c, $a4 c,                  \ rep movsb
-  \ Promote remaining items into registers
+: gen-3arg-promote ( -- )
   stack-depth @ 4 >= if
     $49 c, $8b c, $07 c,           \ mov rax, [r15]
     stack-depth @ 5 >= if
@@ -512,9 +500,21 @@ variable fixup-target  0 fixup-target !
   then
   -3 stack-depth +! ;
 
+: gen-move ( -- )
+  \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,         \ mov rsi, rcx (src from 3rd reg)
+  else
+    $49 c, $8b c, $37 c,         \ mov rsi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
+  then
+  $48 c, $89 c, $df c,           \ mov rdi, rbx (dst)
+  $48 c, $89 c, $c1 c,           \ mov rcx, rax (count)
+  $f3 c, $a4 c,                  \ rep movsb
+  gen-3arg-promote ;
+
 : gen-fill ( -- )
   \ ( addr u char -- ) char=rax, u=rbx, addr=rcx or [r15]
-  \ rdi is free
   stack-depth @ 3 >= if
     $48 c, $89 c, $cf c,         \ mov rdi, rcx (addr from 3rd reg)
   else
@@ -522,23 +522,8 @@ variable fixup-target  0 fixup-target !
     $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
   then
   $48 c, $89 c, $d9 c,           \ mov rcx, rbx (count)
-  \ rax already has char (al used by stosb)
   $f3 c, $aa c,                  \ rep stosb
-  \ Promote remaining items (same pattern as move)
-  stack-depth @ 4 >= if
-    $49 c, $8b c, $07 c,
-    stack-depth @ 5 >= if
-      $49 c, $8b c, $5f c, 8 c,
-      stack-depth @ 6 >= if
-        $49 c, $8b c, $4f c, 16 c,
-      then
-    then
-    stack-depth @ 3 - dup 3 > if drop 3 then 8 *
-    dup 0> if
-      $49 c, $83 c, $c7 c, c,
-    else drop then
-  then
-  -3 stack-depth +! ;
+  gen-3arg-promote ;
 
 \ ============================================================
 \ ARITHMETIC
@@ -708,70 +693,30 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $39 c, $c3 c,
   pop-nos ;
 
-: gen-= ( -- )
+: gen-setcc ( cc -- )
   gen-cmp-setup
-  $0f c, $94 c, $c0 c,
+  $0f c, c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
-: gen-<> ( -- )
-  gen-cmp-setup
-  $0f c, $95 c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
+: gen-= ( -- )   $94 gen-setcc ;
+: gen-<> ( -- )  $95 gen-setcc ;
+: gen-< ( -- )   $9c gen-setcc ;
+: gen-> ( -- )   $9f gen-setcc ;
+: gen-<= ( -- )  $9e gen-setcc ;
+: gen->= ( -- )  $9d gen-setcc ;
+: gen-u< ( -- )  $92 gen-setcc ;
 
-: gen-< ( -- )
-  gen-cmp-setup
-  $0f c, $9c c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-> ( -- )
-  gen-cmp-setup
-  $0f c, $9f c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-<= ( -- )
-  gen-cmp-setup
-  $0f c, $9e c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen->= ( -- )
-  gen-cmp-setup
-  $0f c, $9d c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-u< ( -- )
-  \ ( u1 u2 -- flag ) unsigned less-than
-  gen-cmp-setup                            \ cmp rbx, rax; pop-nos
-  $0f c, $92 c, $c0 c,                    \ setb al (unsigned below)
-  $48 c, $0f c, $b6 c, $c0 c,            \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;                  \ neg rax (true = -1)
-
-: gen-0= ( -- )
+: gen-test-setcc ( cc -- )
   $48 c, $85 c, $c0 c,
-  $0f c, $94 c, $c0 c,
+  $0f c, c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
-: gen-0< ( -- )
-  $48 c, $c1 c, $f8 c, 63 c, ;
-
-: gen-0> ( -- )
-  $48 c, $85 c, $c0 c,
-  $0f c, $9f c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-0<> ( -- )
-  \ ( n -- flag ) true if n != 0
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $95 c, $c0 c,           \ setne al
-  $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;        \ neg rax
+: gen-0= ( -- )  $94 gen-test-setcc ;
+: gen-0< ( -- )  $48 c, $c1 c, $f8 c, 63 c, ;
+: gen-0> ( -- )  $9f gen-test-setcc ;
+: gen-0<> ( -- ) $95 gen-test-setcc ;
 
 : gen-within ( -- )
   \ ( u lo hi -- flag ) true if lo <= u < hi
@@ -1674,48 +1619,8 @@ variable start-jmp
   \ rax already has length
   1 stack-depth +! ;                        \ depth 1->2
 
-: gen-open-file ( -- )
+: gen-open-file-core ( extra-flags -- )
   \ ( addr u fam -- fileid ior )
-  \ fam=rax, u=rbx, addr=rcx or [r15]
-  \ Uses rt-word-buf as temp buffer for null-terminated path
-  1 has-io !
-  \ Save registers
-  stack-depth @ 3 >= if
-    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
-  else
-    $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
-    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
-  then
-  \ rsi=addr, rbx=len, rax=fam
-  \ Copy string to rt-word-buf and null-terminate
-  $50 c,                                    \ push rax (save fam)
-  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
-  $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
-  $f3 c, $a4 c,                            \ rep movsb (copy string)
-  $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0 (null-terminate)
-  \ Now call open syscall
-  $58 c,                                    \ pop rax (fam -> flags)
-  $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
-  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf (path)
-  $ba c, 420 d,                            \ mov edx, 0644 (mode)
-  $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
-  $0f c, $05 c,                            \ syscall
-  \ rax = fd (>=0) or -errno (<0)
-  \ Convert to fileid + ior
-  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save fd)
-  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0 = success)
-  $48 c, $85 c, $db c,                     \ test rbx, rbx
-  $79 c, 6 c,                              \ jns +6 (skip if fd >= 0)
-  $48 c, $31 c, $db c,                     \ xor rbx, rbx (fileid = 0 on error)
-  $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1 on error)
-  \ Stack result: rbx=fileid, rax=ior
-  \ Consumed 3 (addr u fam), produced 2 (fileid ior) = net -1
-  -1 stack-depth +!
-  ;
-
-: gen-create-file ( -- )
-  \ ( addr u fam -- fileid ior )
-  \ Like open-file but with O_CREAT | O_TRUNC added to flags
   1 has-io !
   stack-depth @ 3 >= if
     $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
@@ -1723,27 +1628,28 @@ variable start-jmp
     $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
     $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
   then
-  \ rsi=addr, rbx=len, rax=fam
   $50 c,                                    \ push rax (save fam)
   $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
   $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
   $f3 c, $a4 c,                            \ rep movsb
   $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0
-  $58 c,                                    \ pop rax (fam)
-  $48 c, $0d c, 576 d,                     \ or rax, O_CREAT|O_TRUNC (64|512)
+  $58 c,                                    \ pop rax (fam -> flags)
+  ?dup if $48 c, $0d c, d, then            \ or rax, extra-flags (if any)
   $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
   $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
   $ba c, 420 d,                            \ mov edx, 0644
   $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
   $0f c, $05 c,                            \ syscall
-  $48 c, $89 c, $c3 c,                     \ mov rbx, rax
-  $48 c, $31 c, $c0 c,                     \ xor eax, eax
+  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save fd)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0)
   $48 c, $85 c, $db c,                     \ test rbx, rbx
   $79 c, 6 c,                              \ jns +6
   $48 c, $31 c, $db c,                     \ xor rbx, rbx
   $48 c, $ff c, $c8 c,                     \ dec rax
-  -1 stack-depth +!
-  ;
+  -1 stack-depth +! ;
+
+: gen-open-file ( -- )   0 gen-open-file-core ;
+: gen-create-file ( -- ) 576 gen-open-file-core ;
 
 : gen-close-file ( -- )
   \ ( fileid -- ior )
@@ -2973,10 +2879,12 @@ variable scan-io
         input-buf input-pos @ 1+ + c@ [char] - = if
           drop 2 input-pos +! r> drop 1 >r
         else
+          drop
           begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
           r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
         then
       else
+        drop
         begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
         r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
       then
