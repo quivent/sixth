@@ -23,6 +23,7 @@
 /* EMIT ( c -- ) Output a character */
 static void p_emit(vm_t *vm) {
     fputc((int)pop(vm), vm->out);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* TYPE ( addr u -- ) Output a string */
@@ -35,11 +36,13 @@ static void p_type(vm_t *vm) {
         return;
     }
     fwrite(vm->mem + addr, 1, len, vm->out);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* CR ( -- ) Output newline */
 static void p_cr(vm_t *vm) {
     fputc('\n', vm->out);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* KEY ( -- c ) Read a character from stdin */

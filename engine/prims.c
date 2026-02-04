@@ -668,12 +668,14 @@ static void p_parse_name(vm_t *vm) {
 static void p_dot(vm_t *vm) {
     cell_t n = pop(vm);
     fprintf(vm->out, "%ld ", (long)n);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* U. ( u -- ) Print unsigned number and space */
 static void p_u_dot(vm_t *vm) {
     ucell_t n = (ucell_t)pop(vm);
     fprintf(vm->out, "%lu ", (unsigned long)n);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* .S ( -- ) Print stack contents */
@@ -683,6 +685,7 @@ static void p_dot_s(vm_t *vm) {
     for (int i = d - 1; i >= 0; i--) {
         fprintf(vm->out, "%ld ", (long)vm->sp[i]);
     }
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* <# ( -- ) Begin pictured numeric output */
@@ -853,6 +856,7 @@ static void p_dot_quote(vm_t *vm) {
         if (xt_type >= 0) vm_compile_cell(vm, xt_type);
     } else {
         fwrite(buf, 1, len, vm->out);
+        if (vm->out == stdout) fflush(stdout);
     }
 }
 
@@ -861,6 +865,7 @@ static void p_dot_paren(vm_t *vm) {
     char buf[PAD_SIZE];
     int len = vm_parse(vm, ')', buf);
     fwrite(buf, 1, len, vm->out);
+    if (vm->out == stdout) fflush(stdout);
 }
 
 /* ============================================================

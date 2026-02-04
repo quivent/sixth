@@ -312,9 +312,9 @@ variable start-jmp
   \ Try user dictionary
   2dup dict-find ?dup if          ( addr u entry )
     \ Check $800 flag - inline variable/constant/create stubs
-    dup dict-flags @ $800 and if
+    dup dict-flags @ $FFFFFFFF and $800 and if
       \ Inline: push value from stub's mov rax,imm64 instruction
-      dict-addr @ 2 + code-buf + @   \ get imm64 value (after 48 b8)
+      dict-addr @ $FFFFFFFF and 2 + code-buf + @   \ get imm64 value (after 48 b8)
       ct-push                        \ push to compile-time stack
       2drop exit
     then
