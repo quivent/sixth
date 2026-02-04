@@ -29,6 +29,11 @@ static void p_emit(vm_t *vm) {
 static void p_type(vm_t *vm) {
     cell_t len = pop(vm);
     cell_t addr = pop(vm);
+    if (addr < 0 || len < 0 || addr + len > MEM_SIZE) {
+        fprintf(stderr, "TYPE: bad addr=%ld len=%ld\n", addr, len);
+        vm_abort(vm, "TYPE: out of bounds");
+        return;
+    }
     fwrite(vm->mem + addr, 1, len, vm->out);
 }
 

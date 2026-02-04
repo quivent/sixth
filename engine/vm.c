@@ -8,6 +8,18 @@
 #include <ctype.h>
 #include <errno.h>
 #include <strings.h>
+#include <string.h>
+#include <signal.h>
+
+static char last_name[64] = {0};
+static void crash_handler(int sig) {
+    fprintf(stderr, "CRASH sig=%d, last word: %s\n", sig, last_name);
+    _exit(139);
+}
+__attribute__((constructor)) void setup_handler(void) {
+    signal(SIGSEGV, crash_handler);
+    signal(SIGBUS, crash_handler);
+}
 
 /* === Word Handlers === */
 
@@ -46,8 +58,28 @@ void vm_execute(vm_t *vm, int xt) {
 void vm_run(vm_t *vm) {
     cell_t *rsp_base = vm->rsp;
     while (vm->running && vm->rsp <= rsp_base) {
+        cell_t ip_before = vm->ip;
         cell_t xt = vm_fetch_ip(vm);
         vm->w = xt;
+        if (xt < 0 || xt >= vm->dict_count) {
+            fprintf(stderr, "Invalid xt=%ld at ip=%ld (dict_count=%d)\n", xt, ip_before, vm->dict_count);
+            int rd = rdepth(vm);
+            fprintf(stderr, "Return stack depth=%d, data stack depth=%d\n", rd, depth(vm));
+            fprintf(stderr, "Return addresses: ");
+            for (int i = 0; i < rd && i < 10; i++) {
+                fprintf(stderr, "%ld ", vm->rsp[i]);
+            }
+            fprintf(stderr, "\n");
+            fprintf(stderr, "Bytes at ip: ");
+            for (int i = 0; i < 40; i += 8) {
+                if (ip_before + i < MEM_SIZE)
+                    fprintf(stderr, "%ld ", *(cell_t*)(vm->mem + ip_before + i));
+            }
+            fprintf(stderr, "\n");
+            strncpy(last_name, "INVALID_XT", 63);
+        } else {
+            strncpy(last_name, vm->dict[xt].name, 63);
+        }
         vm->dict[xt].code(vm);
     }
 }

@@ -176,7 +176,10 @@ variable info-count  0 info-count !
 \ CONTROL FLOW STACK
 \ ============================================================
 
-: cf-push ( n -- ) cf-stack cf-sp @ cells + !  1 cf-sp +! ;
+: cf-push ( n -- )
+  cf-sp @ 64 >= if ." CF OVERFLOW!" cr 1 throw then
+  dup -100 > over 0< and if ." CF-PUSH NEG: " dup . ." cfsp=" cf-sp @ . ." cp=" code-pos @ . cr then
+  cf-stack cf-sp @ cells + !  1 cf-sp +! ;
 : cf-pop ( -- n )
   cf-sp @ 0= if ." CF UNDERFLOW!" cr 1 throw then
   -1 cf-sp +!  cf-stack cf-sp @ cells + @ ;
