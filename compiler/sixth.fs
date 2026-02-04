@@ -96,6 +96,10 @@ variable last-create-dict  0 last-create-dict !  \ dict index of last CREATE (fo
 \ Stack depth: 0=empty, 1=rax, 2=rax+rbx, 3=rax+rbx+rcx, 4+=memory
 \ Shallow stacks (depth <= 3) live entirely in registers, no memory traffic.
 variable stack-depth  0 stack-depth !
+variable dead-code    0 dead-code !    \ 1 = after unconditional exit, skip depth tracking
+
+: sdepth+! ( n -- ) dead-code @ if drop else stack-depth +! then ;
+: sdepth! ( n -- ) dead-code @ if drop else stack-depth ! then ;
 
 \ OPTIMIZATION 4: DEAD CODE ELIMINATION - track purity and stack effect
 variable has-io       0 has-io !        \ does current word have I/O?
@@ -280,7 +284,7 @@ variable fixup-target  0 fixup-target !
   then
   drop
   $48 c, $89 c, $c3 c,              \ mov rbx, rax
-  1 stack-depth +! ;
+  1 sdepth+! ;
 
 : pop-tos ( -- )
   $48 c, $89 c, $d8 c,
@@ -292,7 +296,7 @@ variable fixup-target  0 fixup-target !
     $49 c, $8b c, $0f c,
     $49 c, $83 c, $c7 c, 8 c,
   then
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : pop-nos ( -- )
   stack-depth @ 1- dup
@@ -303,7 +307,7 @@ variable fixup-target  0 fixup-target !
     $49 c, $8b c, $0f c,
     $4d c, $8d c, $7f c, 8 c,
   then
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 \ ============================================================
 \ CODE GENERATION - PRIMITIVES
@@ -499,7 +503,7 @@ variable fixup-target  0 fixup-target !
       $49 c, $83 c, $c7 c, c,      \ add r15, N*8
     else drop then
   then
-  -3 stack-depth +! ;
+  -3 sdepth+! ;
 
 : gen-move ( -- )
   \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
@@ -586,7 +590,7 @@ variable fixup-target  0 fixup-target !
   $59 c,                                   \ pop rcx (n3=divisor)
   $48 c, $f7 c, $f9 c,                    \ idiv rcx → rax=quot, rdx=rem
   $48 c, $89 c, $d3 c,                    \ mov rbx, rdx (rem → NOS)
-  -1 stack-depth +! ;                      \ consumed 3, produced 2
+  -1 sdepth+! ;                      \ consumed 3, produced 2
 
 : gen-*/ ( -- )
   \ ( n1 n2 n3 -- quot ) n1*n2/n3 with intermediate double
@@ -602,7 +606,7 @@ variable fixup-target  0 fixup-target !
   $59 c,                                   \ pop rcx (n3=divisor)
   $48 c, $f7 c, $f9 c,                    \ idiv rcx → rax=quot, rdx=rem
   pop-nos                                  \ drop NOS, consumed 3 produced 1
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-negate ( -- )  $48 c, $f7 c, $d8 c, ;
 : gen-1+ ( -- )  $48 c, $ff c, $c0 c, ;
@@ -735,7 +739,7 @@ variable cmp-pending   0 cmp-pending !
   $0f c, $92 c, $c0 c,             \ setb al
   $48 c, $0f c, $b6 c, $c0 c,     \ movzx rax, al
   $48 c, $f7 c, $d8 c,             \ neg rax
-  -2 stack-depth +! ;
+  -2 sdepth+! ;
 
 : gen-count ( -- )
   \ ( c-addr -- c-addr+1 u ) get length byte, advance address
@@ -772,7 +776,7 @@ variable cmp-pending   0 cmp-pending !
     $49 c, $8b c, $0f c,               \ mov rcx, [r15]
     $49 c, $83 c, $c7 c, 8 c,          \ add r15, 8
   then
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-rshift ( -- )
   \ ( value count -- result ) count=rax, value=rbx
@@ -789,7 +793,7 @@ variable cmp-pending   0 cmp-pending !
     $49 c, $8b c, $0f c,               \ mov rcx, [r15]
     $49 c, $83 c, $c7 c, 8 c,          \ add r15, 8
   then
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 \ ============================================================
 \ DOUBLE-CELL AND UNSIGNED
@@ -833,7 +837,7 @@ variable cmp-pending   0 cmp-pending !
   \ Result: ( rem quot ) — rem in NOS, quot in TOS
   $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
   \ rax already has quotient (TOS)
-  -1 stack-depth +! ;              \ consumed 3, produced 2
+  -1 sdepth+! ;              \ consumed 3, produced 2
 
 : gen-sm/rem ( -- )
   \ ( dlo dhi n -- rem quot ) signed symmetric division
@@ -849,7 +853,7 @@ variable cmp-pending   0 cmp-pending !
   $59 c,                            \ pop rcx (divisor → rcx)
   $48 c, $f7 c, $f9 c,             \ idiv rcx → rax=quot, rdx=rem
   $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-fm/mod ( -- )
   \ ( dlo dhi n -- rem quot ) floored division
@@ -877,7 +881,7 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $ff c, $c8 c,             \ dec rax
   \ Result: ( rem quot )
   $48 c, $89 c, $d3 c,             \ mov rbx, rdx (rem → NOS)
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-d+ ( -- )
   \ ( d1lo d1hi d2lo d2hi -- dlo dhi )
@@ -899,7 +903,7 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $11 c, $d0 c,             \ adc rax, rdx  (high = d1hi + d2hi + carry)
   $48 c, $89 c, $cb c,             \ mov rbx, rcx  (low → NOS)
   \ rax = high (TOS)
-  -2 stack-depth +! ;              \ consumed 4, produced 2
+  -2 sdepth+! ;              \ consumed 4, produced 2
 
 : gen-d- ( -- )
   \ ( d1lo d1hi d2lo d2hi -- dlo dhi )
@@ -916,7 +920,7 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $29 c, $d9 c,             \ sub rcx, rbx  (low = d1lo - d2lo)
   $48 c, $19 c, $d0 c,             \ sbb rax, rdx  (high = d1hi - d2hi - borrow)
   $48 c, $89 c, $cb c,             \ mov rbx, rcx
-  -2 stack-depth +! ;
+  -2 sdepth+! ;
 
 \ ============================================================
 \ MEMORY
@@ -934,7 +938,7 @@ variable cmp-pending   0 cmp-pending !
       $49 c, $83 c, $c7 c, 8 c,
     then
   then
-  -2 stack-depth +! ;
+  -2 sdepth+! ;
 
 : gen-c@ ( -- )  $48 c, $0f c, $b6 c, $00 c, ;
 
@@ -948,7 +952,7 @@ variable cmp-pending   0 cmp-pending !
       $49 c, $83 c, $c7 c, 8 c,
     then
   then
-  -2 stack-depth +! ;
+  -2 sdepth+! ;
 
 : gen-+! ( -- )
   \ ( n addr -- ) addr=rax, n=rbx
@@ -960,7 +964,7 @@ variable cmp-pending   0 cmp-pending !
       $49 c, $83 c, $c7 c, 8 c,
     then
   then
-  -2 stack-depth +! ;
+  -2 sdepth+! ;
 
 : gen-cells ( -- )
   \ ( n -- n*8 ) shl rax, 3
@@ -977,7 +981,7 @@ variable cmp-pending   0 cmp-pending !
 : gen->r ( -- )
   $48 c, $83 c, $ed c, 8 c,
   $48 c, $89 c, $45 c, 0 c,
-  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then ;
+  stack-depth @ 1 > if pop-tos else -1 sdepth+! then ;
 
 : gen-r> ( -- )
   push-tos
@@ -991,9 +995,9 @@ variable cmp-pending   0 cmp-pending !
 : gen-2>r ( -- )
   $48 c, $83 c, $ed c, 16 c,
   $48 c, $89 c, $45 c, 8 c,
-  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then
+  stack-depth @ 1 > if pop-tos else -1 sdepth+! then
   $48 c, $89 c, $45 c, 0 c,
-  stack-depth @ 1 > if pop-tos else -1 stack-depth +! then ;
+  stack-depth @ 1 > if pop-tos else -1 sdepth+! then ;
 
 : gen-2r> ( -- )
   push-tos
@@ -1027,7 +1031,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8d c,
   0 d,
-  -2 stack-depth +!
+  -2 sdepth+!
   code-here ;
 
 : gen->if ( -- orig )
@@ -1037,7 +1041,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8e c,
   0 d,
-  -2 stack-depth +!
+  -2 sdepth+!
   code-here ;
 
 : gen-=if ( -- orig )
@@ -1047,7 +1051,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $85 c,
   0 d,
-  -2 stack-depth +!
+  -2 sdepth+!
   code-here ;
 
 : gen-0<if ( -- orig )
@@ -1227,9 +1231,9 @@ variable call-rets   1 call-rets !
         $49 c, $83 c, $c7 c, 8 c,           \ add r15, 8
       then
     then
-    -1 stack-depth +!
+    -1 sdepth+!
   else
-    call-rets @ call-nargs @ - stack-depth +!
+    call-rets @ call-nargs @ - sdepth+!
   then ;
 
 : gen-ret ( -- )
@@ -1263,7 +1267,7 @@ variable call-rets   1 call-rets !
   else dup 1 = if
     $48 c, $89 c, $c8 c,
   then then then
-  stack-depth !
+  sdepth!
   $4d c, $39 c, $ec c,
   $0f c, $84 c,
   0 d,
@@ -1291,7 +1295,7 @@ variable call-rets   1 call-rets !
   else dup 1 = if
     $48 c, $89 c, $c8 c,              \ mov rax, rcx
   then then then
-  stack-depth !
+  sdepth!
   $4d c, $39 c, $ec c,                \ cmp r12, r13
   $0f c, $8d c,                       \ jge rel32 (skip if index >= limit)
   0 d,
@@ -1557,7 +1561,7 @@ variable start-jmp
   $bf c, 1 d,
   $0f c, $05 c,
   stack-depth @ 3 >= if $59 c, then
-  -2 stack-depth +!
+  -2 sdepth+!
   stack-depth @ 1 >= if
     $48 c, $89 c, $c8 c,
     stack-depth @ 2 >= if
@@ -1604,7 +1608,7 @@ variable start-jmp
 : gen-argc ( -- )  \ ( -- n )
   push-tos
   $48 c, $8b c, $04 c, $25 c, rt-argc d,   \ mov rax, [rt-argc]
-  1 stack-depth +! ;
+  1 sdepth+! ;
 
 : gen-argv ( -- )  \ ( n -- addr u )
   \ Get argv[n] as (addr u) string pair
@@ -1622,7 +1626,7 @@ variable start-jmp
   \ Result: NOS=addr, TOS=len
   $48 c, $89 c, $fb c,                     \ mov rbx, rdi (addr)
   \ rax already has length
-  1 stack-depth +! ;                        \ depth 1->2
+  1 sdepth+! ;                        \ depth 1->2
 
 : gen-open-file-core ( extra-flags -- )
   \ ( addr u fam -- fileid ior )
@@ -1651,7 +1655,7 @@ variable start-jmp
   $79 c, 6 c,                              \ jns +6
   $48 c, $31 c, $db c,                     \ xor rbx, rbx
   $48 c, $ff c, $c8 c,                     \ dec rax
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-open-file ( -- )   0 gen-open-file-core ;
 : gen-create-file ( -- ) 576 gen-open-file-core ;
@@ -1692,7 +1696,7 @@ variable start-jmp
   $48 c, $31 c, $db c,                     \ xor rbx, rbx (u2 = 0 on error)
   $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1)
   \ Consumed 3 (addr u fileid), produced 2 (u2 ior) = net -1
-  -1 stack-depth +!
+  -1 sdepth+!
   ;
 
 : gen-write-file ( -- )
@@ -1716,7 +1720,7 @@ variable start-jmp
   $48 c, $31 c, $c0 c,                     \ xor eax, eax (success = 0)
   $eb c, 7 c,                              \ jmp +7 (skip error path)
   $48 c, $c7 c, $c0 c, -1 d,              \ mov rax, -1 (error)
-  -2 stack-depth +!
+  -2 sdepth+!
   ;
 
 : gen-slurp-file ( -- )
@@ -1889,7 +1893,7 @@ variable start-jmp
   $48 c, $39 c, $d6 c,                        \ cmp rsi, rdx (at end?)
   $74 c, 3 c,                                 \ je skip_dec
   $48 c, $ff c, $c8 c,                        \ dec rax (don't count delim)
-  1 stack-depth +! ;                          \ result is 2 cells
+  1 sdepth+! ;                          \ result is 2 cells
 
 : gen-word ( -- )
   \ ( char -- c-addr ) parse word, return counted string
@@ -1904,7 +1908,7 @@ variable start-jmp
   $48 c, $88 c, $04 c, $25 c, rt-word-buf d,  \ mov [rt-word-buf], al
   \ Return address of counted string (drop NOS, set TOS)
   $48 c, $b8 c, rt-word-buf q,                \ mov rax, rt-word-buf
-  -1 stack-depth +! ;                         \ result is 1 cell
+  -1 sdepth+! ;                         \ result is 1 cell
 
 : gen-accept ( -- )
   \ ( addr u1 -- u2 ) read line from stdin into buffer
@@ -1929,7 +1933,7 @@ variable start-jmp
   $48 c, $ff c, $c8 c,                        \ dec rax
   \ done: rax = count (without newline)
   stack-depth @ 3 >= if $59 c, then           \ pop rcx if needed
-  -1 stack-depth +! ;                         \ result is 1 cell (was 2)
+  -1 sdepth+! ;                         \ result is 1 cell (was 2)
 
 : gen-refill ( -- )
   \ ( -- flag ) read line into SOURCE buffer, reset >IN
@@ -1990,7 +1994,7 @@ variable start-jmp
 
 : gen-execute ( -- )  \ ( xt -- )
   $ff c, $d0 c,                               \ call rax
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : emit-rt-find ( -- )
   \ Emit FIND as a callable runtime function. Save address.
@@ -2073,7 +2077,7 @@ variable rt-parse-addr  0 rt-parse-addr !
 : gen-interpret ( -- )  \ ( -- )
   gen-interpret-body
   $c3 c,                                      \ ret
-  0 stack-depth ! ;
+  0 sdepth! ;
 
 : gen-evaluate ( -- )  \ ( addr u -- )
   \ Save old input state to x86 stack
@@ -2096,7 +2100,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   $48 c, $89 c, $3c c, $25 c, rt-source-len d,   \ mov [rt-source-len], rdi
   $5f c,                                         \ pop rdi
   $48 c, $89 c, $3c c, $25 c, rt-source-addr d,  \ mov [rt-source-addr], rdi
-  -2 stack-depth +! ;                            \ consumed addr u
+  -2 sdepth+! ;                            \ consumed addr u
 
 : gen-quit ( -- )
   \ ( -- ) Main REPL loop: begin refill while interpret repeat
@@ -2110,7 +2114,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   $eb c, r@ code-here - 1- c,                   \ jmp loop
   >resolve                                       \ done:
   r> drop
-  0 stack-depth ! ;
+  0 sdepth! ;
 
 : gen-abort ( -- )
   \ ( -- ) Clear stacks, call QUIT
@@ -2123,7 +2127,7 @@ variable rt-parse-addr  0 rt-parse-addr !
   $48 c, $89 c, $c7 c,                          \ mov rdi, rax
   $b8 c, 60 d,                                  \ mov eax, 60 (exit syscall)
   $0f c, $05 c,                                 \ syscall
-  -1 stack-depth +! ;
+  -1 sdepth+! ;
 
 : gen-include ( -- )
   \ Parse filename, slurp file, evaluate contents
@@ -2401,7 +2405,7 @@ variable token-len
 : gen-' ( -- )  \ ( "name" -- xt ) - parse at compile time, emit xt as literal
   get-token dict-find ?dup if
     dict-addr @ $FFFFFFFF and $4000B0 +
-    push-tos  $48 c, $b8 c, q,  1 stack-depth +!
+    push-tos  $48 c, $b8 c, q,  1 sdepth+!
   else ." ' unknown word" cr 1 throw then ;
 
 : gen->body ( -- )  \ ( xt -- addr ) extract data addr from CREATE'd word
@@ -2752,22 +2756,22 @@ variable num-neg
     true exit
   then
   \ ---- Control flow: flush, then normal ----
-  2dup $if str= if 2drop flush-swap ct-flush flush-pending gen-if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $<if str= if 2drop flush-swap ct-flush flush-pending gen-<if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $>if str= if 2drop flush-swap ct-flush flush-pending gen->if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $=if str= if 2drop flush-swap ct-flush flush-pending gen-=if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending gen-0<if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending gen-0=if >r stack-depth @ cf-push r> cf-push true exit then
-  2dup $else str= if 2drop flush-swap ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
-  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop dup s" then" check-depth stack-depth ! true exit then
+  2dup $if str= if 2drop flush-swap ct-flush flush-pending gen-if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $<if str= if 2drop flush-swap ct-flush flush-pending gen-<if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $>if str= if 2drop flush-swap ct-flush flush-pending gen->if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $=if str= if 2drop flush-swap ct-flush flush-pending gen-=if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending gen-0<if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending gen-0=if >r stack-depth @ cf-push 0 cf-push r> cf-push true exit then
+  2dup $else str= if 2drop flush-swap ct-flush cf-pop gen-else cf-pop drop cf-pop >r stack-depth @ cf-push 1 cf-push r> stack-depth ! 0 dead-code ! cf-push true exit then
+  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop drop cf-pop stack-depth ! 0 dead-code ! true exit then
   2dup $begin str= if 2drop flush-swap ct-flush gen-begin cf-push true exit then
   \ OPTIMIZATION 8: save dup-pending/cmp-pending BEFORE flush-swap clears them.
   \ Non-fused path emits gen-dup if dup was pending (e.g. dup until without 0>).
   2dup $until str= if 2drop cmp-pending @ 0 cmp-pending ! dup-pending @ 0 dup-pending !
     flush-swap ct-flush flush-pending
     swap ?dup if nip cf-pop swap gen-until-fused
-    else if gen-dup then cf-pop gen-until then true exit then
-  2dup $0=until str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-0=until true exit then
+    else if gen-dup then cf-pop gen-until then 0 dead-code ! true exit then
+  2dup $0=until str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-0=until 0 dead-code ! true exit then
   2dup $nzloop str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-nzloop true exit then
   2dup $1-nzloop str= if 2drop flush-swap ct-flush flush-pending cf-pop gen-1-nzloop true exit then
   \ OPTIMIZATION 8: same pattern as until. See comment above $until handler.
@@ -2775,8 +2779,8 @@ variable num-neg
     flush-swap ct-flush flush-pending
     swap ?dup if nip cf-pop swap gen-while-fused cf-push cf-push
     else if gen-dup then cf-pop gen-while cf-push cf-push then true exit then
-  2dup $repeat str= if 2drop flush-swap ct-flush cf-pop cf-pop gen-repeat true exit then
-  2dup $again str= if 2drop flush-swap ct-flush cf-pop gen-again true exit then
+  2dup $repeat str= if 2drop flush-swap ct-flush cf-pop cf-pop gen-repeat 0 dead-code ! true exit then
+  2dup $again str= if 2drop flush-swap ct-flush cf-pop gen-again 1 dead-code ! true exit then
   2dup $do str= if 2drop flush-swap
     \ OPTIMIZATION 10: save known trip count and code position.
     \ Only optimize when: ct-depth=2 (just limit/start) AND stack-depth=0 (no runtime values).
@@ -2801,8 +2805,8 @@ variable num-neg
     code-here do-depth @ cells do-origin + !
     stack-depth @ do-depth @ cells do-sdepth + !
     gen-?do true exit then
-  2dup $loop str= if 2drop flush-swap ct-flush gen-loop true exit then
-  2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop true exit then
+  2dup $loop str= if 2drop flush-swap ct-flush gen-loop 0 dead-code ! true exit then
+  2dup $+loop str= if 2drop flush-swap ct-flush flush-pending gen-+loop 0 dead-code ! true exit then
   2dup $i str= if 2drop flush-swap ct-flush gen-i true exit then
   2dup $j str= if 2drop flush-swap ct-flush gen-j true exit then
   2dup $leave str= if 2drop flush-swap ct-flush gen-leave true exit then
@@ -2818,7 +2822,7 @@ variable num-neg
   2dup $2>r str= if 2drop flush-swap ct-flush gen-2>r true exit then
   2dup $2r> str= if 2drop flush-swap ct-flush gen-2r> true exit then
   2dup $2r@ str= if 2drop flush-swap ct-flush gen-2r@ true exit then
-  2dup $exit str= if 2drop flush-swap ct-flush gen-ret true exit then
+  2dup $exit str= if 2drop flush-swap ct-flush gen-ret 1 dead-code ! true exit then
   2dup $here str= if 2drop flush-swap data-here @ ct-push true exit then
   2dup $[char] str= if 2drop flush-swap get-token dup 0> if drop c@ ct-push else 2drop then true exit then
   dup 2 = if over dup c@ [char] . = swap 1+ c@ [char] " = and if
@@ -3036,6 +3040,7 @@ variable is-void  0 is-void !
   scan-rets @ ret-count !
   arg-count @ stack-depth !
   stack-depth @ start-depth !
+  0 dead-code !
   1 state ! ;
 
 : end-def ( -- )
