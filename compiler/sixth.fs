@@ -101,6 +101,7 @@ variable stack-depth  0 stack-depth !
 variable has-io       0 has-io !        \ does current word have I/O?
 variable start-depth  0 start-depth !   \ stack depth at word entry
 variable arg-count    1 arg-count !     \ number of input arguments (from stack comment)
+variable ret-count    1 ret-count !     \ number of return values (from stack comment)
 
 \ Pending call elimination
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
@@ -1026,6 +1027,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8d c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen->if ( -- orig )
@@ -1035,6 +1037,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8e c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen-=if ( -- orig )
@@ -1044,6 +1047,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $85 c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen-0<if ( -- orig )
@@ -1384,6 +1388,7 @@ variable current-word-addr  0 current-word-addr !
 
 : gen-recurse ( -- )
   arg-count @ call-nargs !
+  ret-count @ call-rets !
   current-word-addr @ gen-call ;
 
 : gen-tail-recurse ( -- )
@@ -2485,6 +2490,13 @@ variable num-neg
 \   ct-depth >= 1 → fold the constant
 \   ct-depth == 0 → normal codegen
 \ For everything else: ct-flush first, then normal codegen.
+: check-depth ( saved-depth label-addr label-u -- )
+  stack-depth @ 3 pick <> if
+    ." DEPTH " type ."  in "
+    dict-buf dict-count @ 1- 32 * + 24 type
+    ."  expected=" . ."  got=" stack-depth @ . cr
+  else 2drop drop then ;
+
 : compile-builtin ( addr u -- found? )
   \ ---- Stack manipulation: flush ct-stack first ----
   2dup $dup str= if 2drop flush-swap ct-flush
@@ -2740,14 +2752,14 @@ variable num-neg
     true exit
   then
   \ ---- Control flow: flush, then normal ----
-  2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
-  2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
-  2dup $>if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen->if cf-push true exit then
-  2dup $=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-=if cf-push true exit then
-  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0<if cf-push true exit then
-  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0=if cf-push true exit then
+  2dup $if str= if 2drop flush-swap ct-flush flush-pending gen-if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $<if str= if 2drop flush-swap ct-flush flush-pending gen-<if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $>if str= if 2drop flush-swap ct-flush flush-pending gen->if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $=if str= if 2drop flush-swap ct-flush flush-pending gen-=if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending gen-0<if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending gen-0=if >r stack-depth @ cf-push r> cf-push true exit then
   2dup $else str= if 2drop flush-swap ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
-  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop stack-depth ! true exit then
+  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop dup s" then" check-depth stack-depth ! true exit then
   2dup $begin str= if 2drop flush-swap ct-flush gen-begin cf-push true exit then
   \ OPTIMIZATION 8: save dup-pending/cmp-pending BEFORE flush-swap clears them.
   \ Non-fused path emits gen-dup if dup was pending (e.g. dup until without 0>).
@@ -2924,8 +2936,8 @@ variable scan-body-pos
   info-count @ info-entry >r
   r@ 40 0 fill                                     \ clear entire entry
   scan-name-buf r@ scan-name-len @ dup 23 > if drop 23 then move
-  scan-nargs @ 1 max r@ 24 + c!                    \ nargs at 24 (1 byte)
-  scan-rets @ 1 max r@ 25 + c!                      \ rets at 25 (1 byte)
+  scan-nargs @ r@ 24 + c!                          \ nargs at 24 (1 byte)
+  scan-rets @ 1+ r@ 25 + c!                        \ rets+1 at 25 (0=no comment)
   scan-io @ r@ 26 + c!                             \ flags at 26 (1 byte)
   \ call-count at 28 (2 bytes) - already 0 from fill
   scan-body-pos @ r@ 30 + !                        \ body-pos at 30 (4 bytes)
@@ -2944,7 +2956,7 @@ variable scan-body-pos
       dup 23 > if drop 23 then
       scan-name-buf over 0 fill
       scan-name-buf swap move
-      1 scan-void !  1 scan-nargs !  0 scan-io !
+      1 scan-void !  1 scan-nargs !  1 scan-rets !  0 scan-io !
       scan-stack-comment
       input-pos @ scan-body-pos !                  \ save body start position
       scan-body-io
@@ -2959,7 +2971,7 @@ variable scan-body-pos
   \ Check info-buf first (has call-count for future inlining)
   2dup info-find ?dup if
     dup 24 + c@ call-nargs !
-    dup 25 + c@ dup 0= if drop 1 then call-rets !
+    dup 25 + c@ dup 0= if drop 1 else 1- then call-rets !
     34 + @                             \ ( addr u code-addr )
     ?dup if                            \ code-addr != 0: word is compiled
       -rot 2drop                       \ ( code-addr )
@@ -2970,7 +2982,7 @@ variable scan-body-pos
   then
   \ User definitions - dict-find handles $800 stubs for variables/constants
   2dup dict-find ?dup if
-    nip nip flush-swap ct-flush
+    nip nip flush-swap ct-flush flush-cmp
     \ INLINE: variable/constant stubs → ct-push the literal value
     dup dict-flags @ $800 and if
       dict-addr @ $FFFFFFFF and 2 + code-buf + @ ct-push
@@ -2996,7 +3008,7 @@ variable scan-body-pos
   flush-swap ct-flush
   2dup info-find ?dup if
     dup 24 + c@ call-nargs !
-    dup 25 + c@ dup 0= if drop 1 then call-rets !
+    dup 25 + c@ dup 0= if drop 1 else 1- then call-rets !
     drop
   else
     1 call-nargs !  1 call-rets !
@@ -3006,52 +3018,7 @@ variable scan-body-pos
   code-here add-fixup ;
 
 variable is-void  0 is-void !
-variable ret-count 1 ret-count !
 
-: skip-ws-only ( -- )
-  begin
-    input-pos @ input-len @ >= if exit then
-    input-buf input-pos @ + c@ dup 32 <= swap 0 > and if
-      1 input-pos +!
-    else exit then
-  again ;
-
-: parse-stack-comment ( -- )
-  skip-ws-only
-  input-pos @ input-len @ >= if exit then
-  input-buf input-pos @ + c@ [char] ( <> if exit then
-  input-pos @ 1+ input-len @ >= if exit then
-  input-buf input-pos @ 1+ + c@ 32 > if exit then
-  1 input-pos +!
-  1 is-void !
-  0 arg-count !
-  0 ret-count !
-  0 >r
-  begin
-    skip-ws-only
-    input-pos @ input-len @ >= if r> drop exit then
-    input-buf input-pos @ + c@
-    dup [char] ) = if drop r> drop 1 input-pos +! exit then
-    dup [char] - = if
-      input-pos @ 1+ input-len @ < if
-        input-buf input-pos @ 1+ + c@ [char] - = if
-          drop 2 input-pos +! r> drop 1 >r
-        else
-          drop  \ drop the '-' char
-          begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-          r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-        then
-      else
-        drop  \ drop the '-' char
-        begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-        r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-      then
-    else
-      drop
-      begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-      r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-    then
-  again ;
 
 : start-def ( addr u -- )
   0 ct-depth !
@@ -3061,17 +3028,19 @@ variable ret-count 1 ret-count !
   2drop
   code-here current-word-addr !
   0 has-io !
-  0 is-void !
   0 do-depth !
-  1 arg-count !
-  1 ret-count !
-  parse-stack-comment
+  0 scan-void !  1 scan-nargs !  1 scan-rets !
+  scan-stack-comment
+  scan-void @ is-void !
+  scan-nargs @ arg-count !
+  scan-rets @ ret-count !
   arg-count @ stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
 : end-def ( -- )
   flush-swap ct-flush
+  ret-count @ s" enddef" check-depth
   tail-recurse @ ?dup if
     code-pos !
     gen-tail-recurse
@@ -3136,14 +3105,16 @@ create inc-input 8192 allot
     5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     exit
   then
-  2dup $allot str= if
-    2drop interp-val @ data-here +! exit
-  then
-  2dup $, str= if
-    2drop interp-val @ data-here @ 8 add-init 8 data-here +! exit
-  then
-  2dup $c, str= if
-    2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
+  state @ 0= if
+    2dup $allot str= if
+      2drop interp-val @ data-here +! exit
+    then
+    2dup $, str= if
+      2drop interp-val @ data-here @ 8 add-init 8 data-here +! exit
+    then
+    2dup $c, str= if
+      2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
+    then
   then
   \ s, in interpret mode: string already in data area from s", just keep addr/len
   dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] , = and if
