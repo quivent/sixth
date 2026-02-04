@@ -311,11 +311,18 @@ variable start-jmp
   2dup try-special if 2drop exit then
   \ Try user dictionary
   2dup dict-find ?dup if          ( addr u entry )
+    \ Check $800 flag - inline variable/constant/create stubs
+    dup dict-flags @ $800 and if
+      \ Inline: push value from stub's mov rax,imm64 instruction
+      dict-addr @ 2 + code-buf + @   \ get imm64 value (after 48 b8)
+      ct-push                        \ push to compile-time stack
+      2drop exit
+    then
     >r                             \ save entry, ( addr u )
     info-find ?dup if              ( info-entry|0 )
       24 + c@                      ( nargs )
     else
-      1                            ( default )
+      0                            ( default: variables/stubs take 0 args )
     then
     r> swap >r                     \ ( entry ) nargs on rstack
     flush-all

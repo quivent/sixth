@@ -44,11 +44,12 @@ variable current-word-addr  0 current-word-addr !
   dict-add
   current-word-addr @ >r           \ save for nested definitions
   dict-buf dict-count @ 1- 32 * + dict-addr @ current-word-addr !
-  \ Generate: mov rax, data-addr; ret
-  push-val
+  \ Generate: mov rax, data-addr; ret (caller handles stack)
   $48 c, $b8 c, data-here @ q,     \ mov rax, imm64
-  ret
+  $c3 c,                           \ ret
   8 data-here +!                   \ allocate 8 bytes
+  \ Set $800 flag for inlining
+  $800 dict-buf dict-count @ 1- 32 * + dict-flags !
   r> current-word-addr ! ;
 
 \ ============================================================
@@ -68,10 +69,11 @@ variable const-val  0 const-val !
   dict-add
   current-word-addr @ >r
   dict-buf dict-count @ 1- 32 * + dict-addr @ current-word-addr !
-  \ Generate: mov rax, value; ret
-  push-val
+  \ Generate: mov rax, value; ret (caller handles stack)
   $48 c, $b8 c, const-val @ q,     \ mov rax, imm64
-  ret
+  $c3 c,                           \ ret
+  \ Set $800 flag for inlining
+  $800 dict-buf dict-count @ 1- 32 * + dict-flags !
   r> current-word-addr ! ;
 
 \ ============================================================
@@ -84,10 +86,11 @@ variable const-val  0 const-val !
   dict-add
   current-word-addr @ >r
   dict-buf dict-count @ 1- 32 * + dict-addr @ current-word-addr !
-  \ Generate: mov rax, data-addr; ret
-  push-val
+  \ Generate: mov rax, data-addr; ret (caller handles stack)
   $48 c, $b8 c, data-here @ q,     \ mov rax, imm64
-  ret
+  $c3 c,                           \ ret
+  \ Set $800 flag for inlining
+  $800 dict-buf dict-count @ 1- 32 * + dict-flags !
   r> current-word-addr ! ;
 
 \ ============================================================
