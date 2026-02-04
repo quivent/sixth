@@ -22,8 +22,8 @@
 #include <stdlib.h>
 
 /* === Configuration === */
-#define DSTACK_SIZE   256
-#define RSTACK_SIZE   256
+#define DSTACK_SIZE   1024
+#define RSTACK_SIZE   1024
 #define MEM_SIZE      (16 * 1024 * 1024)  /* 16 MB dictionary/data space */
 #define TIB_SIZE      1024
 #define PAD_SIZE      4096

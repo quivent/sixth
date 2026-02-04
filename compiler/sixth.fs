@@ -11,7 +11,7 @@
 \ BUFFERS
 \ ============================================================
 
-262144 constant CODE-SIZE   \ 256KB for self-hosting
+524288 constant CODE-SIZE   \ 512KB for self-hosting
 512 constant DICT-SIZE      \ 512 dictionary entries
 150000 constant INPUT-SIZE
 
@@ -58,18 +58,18 @@ DATA-BASE 4256 + constant rt-word-buf    \ runtime address of WORD buffer
 \ Runtime dictionary for FIND
 \ Entry: name[24] + xt[8] + flags[8] = 40 bytes
 DATA-BASE 4320 + constant rt-dict-count   \ 8 bytes: number of entries
-DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
+DATA-BASE 4328 + constant rt-dict-buf     \ 512 * 40 = 20480 bytes
 40 constant RT-DICT-ENTRY-SIZE
-256 constant RT-DICT-MAX
-DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
-DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
-DATA-BASE 14584 + constant rt-last-create \ address of last CREATE'd word's code
-DATA-BASE 14592 + constant rt-argc        \ command line argument count
-DATA-BASE 14600 + constant rt-argv        \ pointer to argv array
-DATA-BASE 14608 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
+512 constant RT-DICT-MAX
+DATA-BASE 24808 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
+DATA-BASE 24816 + constant rt-source-addr \ pointer to current input buffer
+DATA-BASE 24824 + constant rt-last-create \ address of last CREATE'd word's code
+DATA-BASE 24832 + constant rt-argc        \ command line argument count
+DATA-BASE 24840 + constant rt-argv        \ pointer to argv array
+DATA-BASE 24848 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
 262144 constant SLURP-SIZE
 
-variable data-here  DATA-BASE 14608 SLURP-SIZE + + data-here !
+variable data-here  DATA-BASE 24848 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
 4096 constant INIT-MAX
@@ -792,6 +792,14 @@ variable cmp-pending   0 cmp-pending !
   push-tos
   $48 c, $0f c, $b6 c, $03 c,     \ movzx rax, byte [rbx]
   $48 c, $ff c, $c3 c, ;          \ inc rbx
+
+: gen-/string ( -- )
+  \ ( addr u n -- addr+n u-n ) n=rax, u=rbx, addr=rcx
+  $48 c, $01 c, $c1 c,     \ add rcx, rax  (addr+n)
+  $48 c, $29 c, $c3 c,     \ sub rbx, rax  (u-n)
+  $48 c, $89 c, $d8 c,     \ mov rax, rbx  (u-n to TOS)
+  $48 c, $89 c, $cb c,     \ mov rbx, rcx  (addr+n to NOS)
+  -1 stack-depth +! ;
 
 : gen-min ( -- )
   \ ( a b -- min ) b=rax, a=rbx. cmp rbx,rax; cmovl rax,rbx
@@ -2320,6 +2328,7 @@ s" leave" s, 2constant $leave
 s" unloop" s, 2constant $unloop
 s" within" s, 2constant $within
 s" count" s, 2constant $count
+s" /string" s, 2constant $/string
 s" recurse" s, 2constant $recurse
 s" recursive" s, 2constant $recursive
 s" exit" s, 2constant $exit
@@ -2887,6 +2896,7 @@ variable num-neg
   2dup $unloop str= if 2drop flush-swap ct-flush gen-unloop true exit then
   2dup $within str= if 2drop flush-swap ct-flush flush-pending gen-within true exit then
   2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
+  2dup $/string str= if 2drop flush-swap ct-flush gen-/string true exit then
   2dup $recursive str= if 2drop 1 is-recursive ! true exit then
   2dup $recurse str= if
     2drop flush-swap ct-flush 1 is-recursive ! code-here tail-recurse ! gen-recurse true exit then
@@ -3402,7 +3412,7 @@ create inc-input 8192 allot
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 14608 SLURP-SIZE + + data-here !
+  DATA-BASE 24848 SLURP-SIZE + + data-here !
   gen-prologue
   emit-rt-parse
   emit-rt-find

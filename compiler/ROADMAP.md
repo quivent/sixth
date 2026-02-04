@@ -98,23 +98,23 @@ Once READ-LINE and INCLUDE are implemented, we can bootstrap:
 ### Step 1: Create Native Binary
 
 ```bash
-./fifth compiler/sixth.fs compiler/sixth.fs ./sixth
+./fifth compiler/sixth.fs compiler/sixth.fs ./engine/fifth
 #  │                            │              │
 #  └── C interpreter            │              └── Output: native ELF
 #      (engine/sixth.c)         └── Source being compiled
 ```
 
-This produces `./sixth` — a standalone native executable.
+This produces `./engine/fifth` — a standalone native executable.
 
 ### Step 2: Verify Self-Hosting
 
 ```bash
-./sixth compiler/sixth.fs compiler/sixth.fs ./sixth2
+./engine/fifth compiler/sixth.fs compiler/sixth.fs ./engine/fifth2
 #  │                                           │
 #  └── Native binary (no C needed)             └── Should work identically
 ```
 
-If `./sixth2` can also compile programs correctly, we've achieved self-hosting.
+If `./engine/fifth2` can also compile programs correctly, we've achieved self-hosting.
 
 ### Step 3: Delete C Interpreter
 
@@ -295,8 +295,8 @@ This completes the interpreter. Hayes tests can run.
 
 | Task | Purpose |
 |------|---------|
-| Bootstrap sixth | `./fifth sixth.fs sixth.fs ./sixth` — create native binary |
-| Verify self-host | `./sixth sixth.fs sixth.fs ./sixth2` — must work |
+| Bootstrap sixth | `./fifth sixth.fs sixth.fs ./engine/fifth` — create native binary |
+| Verify self-host | `./engine/fifth sixth.fs sixth.fs ./engine/fifth2` — must work |
 | Delete engine/ | `rm -rf engine/` — C interpreter no longer needed |
 
 See "Bootstrap Sequence" above for detailed steps.
@@ -316,7 +316,7 @@ Direct syscalls to SQLite shared library. No more `system("sqlite3 ...")`.
 | Test framework in Forth | ~50 | bash test runner |
 | Hayes harness in Forth | ~30 | external test deps |
 
-**Result**: `./sixth test.fs` runs all tests. No bash anywhere.
+**Result**: `./engine/fifth test.fs` runs all tests. No bash anywhere.
 
 ### Phase 10: Bare Metal — FUTURE
 
@@ -422,15 +422,15 @@ r13 = do/loop limit
 
 ### Self-Hosting (Phase 7)
 
-1. `./fifth compiler/sixth.fs compiler/sixth.fs ./sixth` — C interpreter creates native binary
-2. `./sixth compiler/sixth.fs compiler/sixth.fs ./sixth2` — native binary compiles itself
-3. `./sixth2 compiler/sixth.fs compiler/tests/run.fs` — second-gen compiler passes tests
+1. `./fifth compiler/sixth.fs compiler/sixth.fs ./engine/fifth` — C interpreter creates native binary
+2. `./engine/fifth compiler/sixth.fs compiler/sixth.fs ./engine/fifth2` — native binary compiles itself
+3. `./engine/fifth2 compiler/sixth.fs compiler/tests/run.fs` — second-gen compiler passes tests
 4. `rm -rf engine/` — C interpreter deleted, native binary is the system
-5. `./sixth` starts interactive REPL (QUIT loop)
+5. `./engine/fifth` starts interactive REPL (QUIT loop)
 
 ### Sovereignty (Phase 9)
 
-6. `./sixth test.fs` — test framework in Forth, no bash
+6. `./engine/fifth test.fs` — test framework in Forth, no bash
 7. Hayes Core tests pass via Forth harness
 8. Zero shell-outs in any Sixth program
 

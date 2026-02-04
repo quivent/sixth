@@ -44,7 +44,7 @@ A real test suite would start from the Forth standard and ask "what can't you co
 
 ```bash
 # Strict output comparison (Forth runner)
-./sixth compiler/tests/run.fs
+./engine/fifth compiler/tests/run.fs
 
 # Results: PASS/WRONG/CFAIL/RFAIL/SKIP
 ```

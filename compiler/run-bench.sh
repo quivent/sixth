@@ -282,7 +282,7 @@ for testfile in "$TESTDIR"/[0-9]*.fs; do
 
     # 1. Compile with sixth.fs
     t0=$(ns)
-    if ./sixth compiler/sixth.fs "$testfile" "$TMPDIR/tf-out" >/dev/null 2>&1; then
+    if ./engine/fifth compiler/sixth.fs "$testfile" "$TMPDIR/tf-out" >/dev/null 2>&1; then
         t1=$(ns)
         tf_comp=$((t1 - t0))
     fi

@@ -1,5 +1,5 @@
 \ compare.fs - Compare sixth.fs native vs gcc -O2 on bench/*.fs
-\ Usage: ./sixth bench/compare.fs
+\ Usage: ./engine/fifth bench/compare.fs
 \ Shows compile time and runtime for both compilers.
 \ Ratio = tf/gcc (lower is better for sixth.fs, 1.00 = equal).
 
@@ -69,7 +69,7 @@ variable gcc-run
 
   \ --- Compile with sixth.fs (median of 3) ---
   cmd-reset
-  s" ./sixth compiler/sixth.fs bench/" cmd+
+  s" ./engine/fifth compiler/sixth.fs bench/" cmd+
   name$ cmd+
   s" .fs /tmp/_bench_cmp >/dev/null 2>&1" cmd+
   cmd$ time3 tf-comp !

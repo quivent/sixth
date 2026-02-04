@@ -41,12 +41,20 @@ void vm_execute(vm_t *vm, int xt) {
         vm->dict[xt].code(vm);  /* Primitive: just call */
     }
 }
-
 /* Run compiled code starting from current IP until return stack empties */
 void vm_run(vm_t *vm) {
+    static cell_t last_xt = 0;
     cell_t *rsp_base = vm->rsp;
     while (vm->running && vm->rsp <= rsp_base) {
         cell_t xt = vm_fetch_ip(vm);
+        if (xt < 0 || xt >= MAX_DICT || vm->dict[xt].code == NULL) {
+            fprintf(stderr, "\n*** BAD XT: %ld (last good: %ld '%s')\n",
+                    (long)xt, (long)last_xt,
+                    last_xt >= 0 && last_xt < MAX_DICT ? vm->dict[last_xt].name : "?");
+            vm->running = 0;
+            return;
+        }
+        last_xt = xt;
         vm->w = xt;
         vm->dict[xt].code(vm);
     }

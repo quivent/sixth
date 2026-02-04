@@ -1,5 +1,5 @@
 \ bench.fs - sixth.fs vs GCC -O0 -O1 -O2 -O3 benchmark
-\ Usage: ./sixth compiler/native/bench.fs [N]   N=1..5 (default 5)
+\ Usage: ./engine/fifth compiler/native/bench.fs [N]   N=1..5 (default 5)
 
 \ Missing words
 : >= ( a b -- flag ) < 0= ;
@@ -124,7 +124,7 @@ variable t0
 variable cur-opt   \ ascii '0'..'3'
 
 : tf-cc ( -- addr u )
-  c0 s" ./sixth compiler/sixth.fs /tmp/fb/" c+ bn$ c+ s" .fs /tmp/fb/" c+ bn$ c+ s" _tf 2>/dev/null" c+ c$ ;
+  c0 s" ./engine/fifth compiler/sixth.fs /tmp/fb/" c+ bn$ c+ s" .fs /tmp/fb/" c+ bn$ c+ s" _tf 2>/dev/null" c+ c$ ;
 
 : tf-rc ( -- addr u )
   c0 s" /tmp/fb/" c+ bn$ c+ s" _tf >/tmp/fb/" c+ bn$ c+ s" _tf.out 2>/dev/null" c+ c$ ;

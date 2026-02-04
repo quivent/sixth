@@ -289,21 +289,21 @@ core.fs     --> str.fs, html.fs, sql.fs, pkg.fs
 
 ```bash
 # Run examples
-./sixth examples/db-viewer.fs
-./sixth examples/project-dashboard.fs
+./engine/fifth examples/db-viewer.fs
+./engine/fifth examples/project-dashboard.fs
 
 # One-liner
-./sixth -e "2 3 + . cr"
+./engine/fifth -e "2 3 + . cr"
 
 # Interactive REPL
-./sixth
+./engine/fifth
 
 # Load core libraries interactively
-./sixth -e "require ~/.sixth/lib/pkg.fs use lib:core.fs"
+./engine/fifth -e "require ~/.sixth/lib/pkg.fs use lib:core.fs"
 
 # Package commands
-./sixth pkg list
-./sixth pkg path
+./engine/fifth pkg list
+./engine/fifth pkg path
 ```
 
 ## Package System
@@ -422,7 +422,7 @@ Empty `expect:` = test passes if it compiles and exits cleanly.
 ### Manual Single Test
 
 ```bash
-./sixth compiler/sixth.fs compiler/tests/1000-fold-add.fs /tmp/t && /tmp/t
+./engine/fifth compiler/sixth.fs compiler/tests/1000-fold-add.fs /tmp/t && /tmp/t
 ```
 
 ## Test Policy

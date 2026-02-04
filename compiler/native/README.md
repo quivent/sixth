@@ -18,7 +18,7 @@ x86_64 ELF bytes directly. That is all.
 
 | File | Lines | Language | Purpose |
 |------|-------|----------|---------|
-| `../sixth.fs` | 990 | **Forth** | Full native compiler (self-hosting) |
+| `../engine/fifth.fs` | 990 | **Forth** | Full native compiler (self-hosting) |
 | `../ff.fs` | 346 | **Forth** | Minimal compiler (numbers, arithmetic, print) |
 
 No C in the compilers. Pure Forth. Reads Forth, emits bytes.
@@ -54,9 +54,9 @@ The result: standalone executables under 400 bytes that run at native speed.
 
 ```bash
 cd compiler/native
-../../sixth hello.fs && ./hello        # Hello, World!
-../../sixth sum1b.fs && ./sum1b        # Sum 1 to 1 billion
-../../sixth sieve-fast.fs && ./sieve-fast  # Count primes to 1M
+../../engine/fifth hello.fs && ./hello        # Hello, World!
+../../engine/fifth sum1b.fs && ./sum1b        # Sum 1 to 1 billion
+../../engine/fifth sieve-fast.fs && ./sieve-fast  # Count primes to 1M
 ```
 
 ## Benchmarks
@@ -93,18 +93,18 @@ Against -O2, simple loops lose to constant folding, but real algorithms (sieve) 
 ## Examples
 
 ```bash
-../../sixth square.fs && ./square        # 49 (7*7)
-../../sixth sum.fs && ./sum              # 500000500000 (sum 1-1M)
-../../sixth fib.fs && ./fib              # 102334155 (fib 40)
-../../sixth fib-rec.fs && ./fib-rec      # 9227465 (recursive fib 35)
-../../sixth primes.fs && ./primes        # 78498 (primes to 1M)
-../../sixth collatz.fs && ./collatz      # 524 (Collatz steps for 837799)
-../../sixth collatz-max.fs && ./collatz-max  # 837799 (longest Collatz under 1M)
-../../sixth sieve.fs && ./sieve          # 1229 (primes to 10K)
-../../sixth sieve-1m.fs && ./sieve-1m    # 78498 (primes to 1M)
-../../sixth sieve-fast.fs && ./sieve-fast   # 78498 (optimized)
-../../sixth mandelbrot.fs && ./mandelbrot   # ASCII Mandelbrot
-../../sixth qsort.fs && ./qsort          # Sort 16 values
+../../engine/fifth square.fs && ./square        # 49 (7*7)
+../../engine/fifth sum.fs && ./sum              # 500000500000 (sum 1-1M)
+../../engine/fifth fib.fs && ./fib              # 102334155 (fib 40)
+../../engine/fifth fib-rec.fs && ./fib-rec      # 9227465 (recursive fib 35)
+../../engine/fifth primes.fs && ./primes        # 78498 (primes to 1M)
+../../engine/fifth collatz.fs && ./collatz      # 524 (Collatz steps for 837799)
+../../engine/fifth collatz-max.fs && ./collatz-max  # 837799 (longest Collatz under 1M)
+../../engine/fifth sieve.fs && ./sieve          # 1229 (primes to 10K)
+../../engine/fifth sieve-1m.fs && ./sieve-1m    # 78498 (primes to 1M)
+../../engine/fifth sieve-fast.fs && ./sieve-fast   # 78498 (optimized)
+../../engine/fifth mandelbrot.fs && ./mandelbrot   # ASCII Mandelbrot
+../../engine/fifth qsort.fs && ./qsort          # Sort 16 values
 ```
 
 ## Architecture

@@ -2,7 +2,7 @@
 \ 1. Compiles and runs all 1000 compiler tests, checks total time ceiling
 \ 2. Each bench/*.fs with a BENCH header: median-of-3, 10% threshold
 \
-\ Usage: ./sixth bench/perf.fs
+\ Usage: ./engine/fifth bench/perf.fs
 
 \ Inline string buffer
 4096 constant str-max
@@ -81,7 +81,7 @@ variable test-total  0 test-total !
   1 test-total +!
   \ Compile
   str-reset
-  s" ./sixth compiler/sixth.fs " str+
+  s" ./engine/fifth compiler/sixth.fs " str+
   bpath$ str+
   s"  /tmp/t-" str+
   bname$ str+
@@ -211,7 +211,7 @@ variable run-ceil      0 run-ceil !
 
 : time-compile ( -- ms )
   str-reset
-  s" ./sixth compiler/sixth.fs " str+
+  s" ./engine/fifth compiler/sixth.fs " str+
   bpath$ str+
   s"  /tmp/perf-" str+
   bname$ str+
