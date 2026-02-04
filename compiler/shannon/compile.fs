@@ -52,11 +52,10 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   \ Emit deferred comparison if any
   cmp-pending @ ?dup if
     0 cmp-pending !
-    case
-      1 of emit-0= endof
-      2 of emit-0> endof
-      3 of emit-0< endof
-    endcase
+    dup 1 = if drop emit-0= else
+    dup 2 = if drop emit-0> else
+    dup 3 = if drop emit-0< else
+    drop then then then
   then ;
 
 : flush-all ( -- )
@@ -260,6 +259,10 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   ct-depth@ 0> if fold-2/ else
   1 tos sar-ri then ;               \ sar rax, 1
 
+: compile-cells ( -- )
+  flush-swap
+  ct-depth@ 0> if ct-pop 8 * ct-push else emit-cells then ;
+
 : compile-abs ( -- )
   \ ( n -- |n| ) absolute value
   flush-swap
@@ -458,6 +461,7 @@ variable cmp-pending   0 cmp-pending ! \ Deferred comparison (1=0=, 2=0>, 3=0<)
   2dup s" 2*" str= if 2drop compile-2* true exit then
   2dup s" 2/" str= if 2drop compile-2/ true exit then
   2dup s" abs" str= if 2drop compile-abs true exit then
+  2dup s" cells" str= if 2drop compile-cells true exit then
   2drop false ;
 
 : try-stack-op ( addr u -- handled? )

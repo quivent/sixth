@@ -93,6 +93,10 @@
   \ ( x -- x-1 ) decrement TOS
   tos dec-r ;
 
+: emit-cells ( -- )
+  \ ( n -- n*8 ) multiply by cell size
+  3 tos shl-ri ;                    \ shl rax, 3
+
 \ ============================================================
 \ FUSED IMMEDIATE OPERATIONS
 \ ============================================================

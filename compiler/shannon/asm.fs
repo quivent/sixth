@@ -226,9 +226,9 @@
   over 0= if
     \ [base]
     over 7 and 5 = if
-      modrm-mr8 c, drop 0 c,
+      nip modrm-mr8 c, 0 c,
     else
-      modrm-mr c, drop
+      nip modrm-mr c,
     then
   else over dup -128 >= swap 127 <= and if
     \ [base+disp8]
@@ -248,9 +248,9 @@
   over 0= if
     \ [base]
     over 7 and 5 = if
-      >r nip r> swap modrm-mr8 c, 0 c,
+      >r nip r> modrm-mr8 c, 0 c,
     else
-      >r nip r> swap modrm-mr c,
+      >r nip r> modrm-mr c,
     then
   else over dup -128 >= swap 127 <= and if
     \ [base+disp8]
@@ -276,7 +276,7 @@
   \ MOV byte [base+offset], src (low 8 bits)
   $88 c,
   over 0= if
-    over 7 and 5 = if modrm-mr8 c, drop 0 c, else modrm-mr c, drop then
+    over 7 and 5 = if nip modrm-mr8 c, 0 c, else nip modrm-mr c, then
   else over dup -128 >= swap 127 <= and if
     modrm-mr8 c, c,
   else
