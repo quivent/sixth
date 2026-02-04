@@ -12,7 +12,7 @@
 \ ============================================================
 
 262144 constant CODE-SIZE   \ 256KB for self-hosting
-512 constant DICT-SIZE      \ 512 dictionary entries
+1024 constant DICT-SIZE     \ 1024 dictionary entries
 150000 constant INPUT-SIZE
 
 create code-buf CODE-SIZE allot
@@ -25,7 +25,7 @@ create input-buf INPUT-SIZE allot
 variable input-len  0 input-len !
 variable input-pos  0 input-pos !
 
-\ Dictionary: 64 entries, 32 bytes each (24 name + 4 addr + 4 flags)
+\ Dictionary: 1024 entries, 32 bytes each (24 name + 4 addr + 4 flags)
 create dict-buf DICT-SIZE 32 * allot
 variable dict-count  0 dict-count !
 
@@ -60,16 +60,16 @@ DATA-BASE 4256 + constant rt-word-buf    \ runtime address of WORD buffer
 DATA-BASE 4320 + constant rt-dict-count   \ 8 bytes: number of entries
 DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
 40 constant RT-DICT-ENTRY-SIZE
-256 constant RT-DICT-MAX
-DATA-BASE 14568 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
-DATA-BASE 14576 + constant rt-source-addr \ pointer to current input buffer
-DATA-BASE 14584 + constant rt-last-create \ address of last CREATE'd word's code
-DATA-BASE 14592 + constant rt-argc        \ command line argument count
-DATA-BASE 14600 + constant rt-argv        \ pointer to argv array
-DATA-BASE 14608 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
+1024 constant RT-DICT-MAX
+DATA-BASE 45288 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
+DATA-BASE 45296 + constant rt-source-addr \ pointer to current input buffer
+DATA-BASE 45304 + constant rt-last-create \ address of last CREATE'd word's code
+DATA-BASE 45312 + constant rt-argc        \ command line argument count
+DATA-BASE 45320 + constant rt-argv        \ pointer to argv array
+DATA-BASE 45328 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
 262144 constant SLURP-SIZE
 
-variable data-here  DATA-BASE 14608 SLURP-SIZE + + data-here !
+variable data-here  DATA-BASE 45328 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
 4096 constant INIT-MAX
@@ -233,6 +233,7 @@ variable fixup-target  0 fixup-target !
   loop 2drop ;
 
 : dict-add ( addr u -- )
+  dict-count @ DICT-SIZE >= if 2drop exit then
   2dup code-here resolve-fixups
   dict-entry >r
   r@ 24 0 fill
@@ -3405,7 +3406,7 @@ create inc-input 8192 allot
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 14608 SLURP-SIZE + + data-here !
+  DATA-BASE 45328 SLURP-SIZE + + data-here !
   gen-prologue
   emit-rt-parse
   emit-rt-find
