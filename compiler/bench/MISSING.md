@@ -58,7 +58,7 @@ Check `compile-builtin` in sixth.fs for implementation status.
 gcc -O2 bench.c -o bench_c
 
 # Compile Sixth (when ready)
-./sixth bench.fs -o bench_fs
+./engine/fifth bench.fs -o bench_fs
 
 # Compare
 time ./bench_c

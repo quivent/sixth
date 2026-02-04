@@ -612,7 +612,7 @@ bye
 
 **Run a test:**
 ```bash
-./sixth tests/2000-inline-simple.fs > /tmp/out 2>&1
+./engine/fifth tests/2000-inline-simple.fs > /tmp/out 2>&1
 ./out
 ```
 

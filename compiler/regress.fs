@@ -1,7 +1,7 @@
 \ regress.fs - Fast sixth.fs regression test
 \ Compiles each test with sixth.fs, runs it, compares output to expected.
 \ No GCC. No timing. Just correctness.
-\ Usage: ./sixth compiler/regress.fs
+\ Usage: ./engine/fifth compiler/regress.fs
 \ ~10 seconds for 1050 tests.
 
 require lib/str.fs
@@ -92,7 +92,7 @@ variable last-slash
 
   \ Compile with sixth.fs
   str-reset
-  s" ./sixth compiler/sixth.fs " str+
+  s" ./engine/fifth compiler/sixth.fs " str+
   path$ str+
   s"  /tmp/_regress >/dev/null 2>&1" str+
   str$ system-rc

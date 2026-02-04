@@ -33,7 +33,7 @@ brew install sixth
 ```bash
 git clone https://github.com/quivent/sixth.git
 cd sixth && cd engine && make && cd ..
-./sixth install.fs
+./engine/fifth install.fs
 ```
 
 Sixth installs itself to `/usr/local/bin`. Then just `sixth` from anywhere.
@@ -582,7 +582,7 @@ Sixth Compiler (compiler/)
                     │
       ┌─────────────┼─────────────┐
       ▼             ▼             ▼
- ./sixth        ./sixth        ./sixth
+ ./engine/fifth        ./engine/fifth        ./engine/fifth
 (default)       compile       --emit-c
       │             │             │
       ▼             ▼             ▼

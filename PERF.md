@@ -40,9 +40,9 @@ r13 = do/loop limit
 
 ```bash
 # Core benchmarks (Sixth)
-./sixth compiler/sixth.fs compiler/bench/ack.fs /tmp/ack && time /tmp/ack
-./sixth compiler/sixth.fs compiler/bench/fib40.fs /tmp/fib && time /tmp/fib
-./sixth compiler/sixth.fs compiler/bench/primes.fs /tmp/primes && time /tmp/primes
+./engine/fifth compiler/sixth.fs compiler/bench/ack.fs /tmp/ack && time /tmp/ack
+./engine/fifth compiler/sixth.fs compiler/bench/fib40.fs /tmp/fib && time /tmp/fib
+./engine/fifth compiler/sixth.fs compiler/bench/primes.fs /tmp/primes && time /tmp/primes
 
 # Compare to GCC -O2
 gcc -O2 compiler/bench/ack.c -o /tmp/ack_c && time /tmp/ack_c

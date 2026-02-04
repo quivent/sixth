@@ -27,7 +27,7 @@ run_bench() {
 
     # Compile Sixth
     local c_s_start=$(date +%s%N)
-    if ! ./sixth "$COMPILER" "$fsfile" "$bin_s" >/dev/null 2>&1; then
+    if ! ./engine/fifth "$COMPILER" "$fsfile" "$bin_s" >/dev/null 2>&1; then
         echo "$bench:CFAIL:0:0:0:0"
         return
     fi

@@ -1,5 +1,5 @@
 \ tools/monitor.fs - Fifth Compiler Monitor TUI
-\ Usage: ./sixth tools/monitor.fs
+\ Usage: ./engine/fifth tools/monitor.fs
 
 require lib/tui.fs
 require tools/vocab.fs
@@ -334,7 +334,7 @@ variable _opt-row
   attr-dim ." Press 'r' to run optimization tests" attr-reset ;
 
 : run-opt-tests ( -- )
-  s" ./sixth compiler/tests/run.fs > /tmp/fifth-mon-opt.txt 2>&1" system
+  s" ./engine/fifth compiler/tests/run.fs > /tmp/fifth-mon-opt.txt 2>&1" system
   s" /tmp/fifth-mon-opt.txt" slurp-file
   dup 0> 0= if 2drop exit then
   dup 2047 > if 2drop exit then
@@ -392,7 +392,7 @@ variable test-loaded  0 test-loaded !
   else 2drop then ;
 
 : run-all-tests ( -- )
-  s" ./sixth compiler/tests/run.fs > /tmp/fifth-mon-testout.txt 2>&1" system
+  s" ./engine/fifth compiler/tests/run.fs > /tmp/fifth-mon-testout.txt 2>&1" system
   load-test-results ;
 
 : handle-tests-key ( c -- )

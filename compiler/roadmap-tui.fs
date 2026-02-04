@@ -327,11 +327,11 @@ variable done-count
 
   1+ dup 1 term-goto tui-cr
   1+ dup 1 term-goto
-  fg-yellow ." 1. " attr-reset ." ./sixth sixth.fs produces working binary" tui-cr
+  fg-yellow ." 1. " attr-reset ." ./engine/fifth sixth.fs produces working binary" tui-cr
   1+ dup 1 term-goto
   fg-yellow ." 2. " attr-reset ." That binary can compile sixth.fs again (bootstrap)" tui-cr
   1+ dup 1 term-goto
-  fg-yellow ." 3. " attr-reset ." ./sixth starts interactive REPL" tui-cr
+  fg-yellow ." 3. " attr-reset ." ./engine/fifth starts interactive REPL" tui-cr
   1+ dup 1 term-goto
   fg-yellow ." 4. " attr-reset ." rm -rf engine/ - no C required" tui-cr
   1+ dup 1 term-goto

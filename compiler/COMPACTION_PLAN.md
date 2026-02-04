@@ -267,21 +267,21 @@ After each phase:
 
 1. **Run test suite**:
    ```bash
-   ./sixth compiler/tests/run.fs
+   ./engine/fifth compiler/tests/run.fs
    ```
    All 1606 tests must pass.
 
 2. **Run benchmarks**:
    ```bash
-   ./sixth compiler/sixth.fs compiler/bench/ack.fs /tmp/ack && time /tmp/ack
-   ./sixth compiler/sixth.fs compiler/bench/fib40.fs /tmp/fib && time /tmp/fib
-   ./sixth compiler/sixth.fs compiler/bench/primes.fs /tmp/primes && time /tmp/primes
+   ./engine/fifth compiler/sixth.fs compiler/bench/ack.fs /tmp/ack && time /tmp/ack
+   ./engine/fifth compiler/sixth.fs compiler/bench/fib40.fs /tmp/fib && time /tmp/fib
+   ./engine/fifth compiler/sixth.fs compiler/bench/primes.fs /tmp/primes && time /tmp/primes
    ```
    Times must match or beat baseline.
 
 3. **Self-hosting test**:
    ```bash
-   ./sixth compiler/sixth.fs compiler/sixth.fs /tmp/sixth2
+   ./engine/fifth compiler/sixth.fs compiler/sixth.fs /tmp/sixth2
    /tmp/sixth2 compiler/sixth.fs compiler/sixth.fs /tmp/sixth3
    diff /tmp/sixth2 /tmp/sixth3  # Must be identical
    ```

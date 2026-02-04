@@ -66,10 +66,10 @@ Build a compiler that generates code like the hand-coded versions:
 
 ```bash
 # Run a .fs file through the interpreter
-./sixth myprogram.fs
+./engine/fifth myprogram.fs
 
 # The compiler (when restored) would be:
-./sixth compiler/sixth.fs input.fs    # → produces a.out
+./engine/fifth compiler/sixth.fs input.fs    # → produces a.out
 ./a.out                             # → runs native binary
 ```
 
