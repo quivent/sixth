@@ -11,8 +11,8 @@
 \ BUFFERS
 \ ============================================================
 
-524288 constant CODE-SIZE   \ 512KB for self-hosting
-512 constant DICT-SIZE      \ 512 dictionary entries
+262144 constant CODE-SIZE   \ 256KB for self-hosting
+1024 constant DICT-SIZE     \ 1024 dictionary entries
 150000 constant INPUT-SIZE
 
 create code-buf CODE-SIZE allot
@@ -25,7 +25,7 @@ create input-buf INPUT-SIZE allot
 variable input-len  0 input-len !
 variable input-pos  0 input-pos !
 
-\ Dictionary: 64 entries, 32 bytes each (24 name + 4 addr + 4 flags)
+\ Dictionary: 1024 entries, 32 bytes each (24 name + 4 addr + 4 flags)
 create dict-buf DICT-SIZE 32 * allot
 variable dict-count  0 dict-count !
 
@@ -58,18 +58,18 @@ DATA-BASE 4256 + constant rt-word-buf    \ runtime address of WORD buffer
 \ Runtime dictionary for FIND
 \ Entry: name[24] + xt[8] + flags[8] = 40 bytes
 DATA-BASE 4320 + constant rt-dict-count   \ 8 bytes: number of entries
-DATA-BASE 4328 + constant rt-dict-buf     \ 512 * 40 = 20480 bytes
+DATA-BASE 4328 + constant rt-dict-buf     \ 256 * 40 = 10240 bytes
 40 constant RT-DICT-ENTRY-SIZE
-512 constant RT-DICT-MAX
-DATA-BASE 24808 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
-DATA-BASE 24816 + constant rt-source-addr \ pointer to current input buffer
-DATA-BASE 24824 + constant rt-last-create \ address of last CREATE'd word's code
-DATA-BASE 24832 + constant rt-argc        \ command line argument count
-DATA-BASE 24840 + constant rt-argv        \ pointer to argv array
-DATA-BASE 24848 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
+1024 constant RT-DICT-MAX
+DATA-BASE 45288 + constant rt-state       \ runtime STATE: 0=interpret, 1=compile
+DATA-BASE 45296 + constant rt-source-addr \ pointer to current input buffer
+DATA-BASE 45304 + constant rt-last-create \ address of last CREATE'd word's code
+DATA-BASE 45312 + constant rt-argc        \ command line argument count
+DATA-BASE 45320 + constant rt-argv        \ pointer to argv array
+DATA-BASE 45328 + constant rt-slurp-buf   \ slurp-file buffer (262144 bytes)
 262144 constant SLURP-SIZE
 
-variable data-here  DATA-BASE 24848 SLURP-SIZE + + data-here !
+variable data-here  DATA-BASE 45328 SLURP-SIZE + + data-here !
 
 \ Data initialization table (for , and c,)
 4096 constant INIT-MAX
@@ -101,6 +101,7 @@ variable stack-depth  0 stack-depth !
 variable has-io       0 has-io !        \ does current word have I/O?
 variable start-depth  0 start-depth !   \ stack depth at word entry
 variable arg-count    1 arg-count !     \ number of input arguments (from stack comment)
+variable ret-count    1 ret-count !     \ number of return values (from stack comment)
 
 \ Pending call elimination
 variable pending-call   0 pending-call !   \ address of pending call, 0=none
@@ -176,7 +177,10 @@ variable info-count  0 info-count !
 \ CONTROL FLOW STACK
 \ ============================================================
 
-: cf-push ( n -- ) cf-stack cf-sp @ cells + !  1 cf-sp +! ;
+: cf-push ( n -- )
+  cf-sp @ 64 >= if ." CF OVERFLOW!" cr 1 throw then
+  dup -100 > over 0< and if ." CF-PUSH NEG: " dup . ." cfsp=" cf-sp @ . ." cp=" code-pos @ . cr then
+  cf-stack cf-sp @ cells + !  1 cf-sp +! ;
 : cf-pop ( -- n )
   cf-sp @ 0= if ." CF UNDERFLOW!" cr 1 throw then
   -1 cf-sp +!  cf-stack cf-sp @ cells + @ ;
@@ -230,6 +234,7 @@ variable fixup-target  0 fixup-target !
   loop 2drop ;
 
 : dict-add ( addr u -- )
+  dict-count @ DICT-SIZE >= if 2drop exit then
   2dup code-here resolve-fixups
   dict-entry >r
   r@ 24 0 fill
@@ -480,19 +485,7 @@ variable fixup-target  0 fixup-target !
   stack-depth @ 3 >= if $59 c, then       \ restore rcx
   stack-depth @ 2 >= if $5b c, then ;     \ restore rbx
 
-: gen-move ( -- )
-  \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
-  \ rsi/rdi are free (not used by stack machine)
-  stack-depth @ 3 >= if
-    $48 c, $89 c, $ce c,         \ mov rsi, rcx (src from 3rd reg)
-  else
-    $49 c, $8b c, $37 c,         \ mov rsi, [r15]
-    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
-  then
-  $48 c, $89 c, $df c,           \ mov rdi, rbx (dst)
-  $48 c, $89 c, $c1 c,           \ mov rcx, rax (count)
-  $f3 c, $a4 c,                  \ rep movsb
-  \ Promote remaining items into registers
+: gen-3arg-promote ( -- )
   stack-depth @ 4 >= if
     $49 c, $8b c, $07 c,           \ mov rax, [r15]
     stack-depth @ 5 >= if
@@ -508,9 +501,21 @@ variable fixup-target  0 fixup-target !
   then
   -3 stack-depth +! ;
 
+: gen-move ( -- )
+  \ ( src dst u -- ) u=rax, dst=rbx, src=rcx or [r15]
+  stack-depth @ 3 >= if
+    $48 c, $89 c, $ce c,         \ mov rsi, rcx (src from 3rd reg)
+  else
+    $49 c, $8b c, $37 c,         \ mov rsi, [r15]
+    $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
+  then
+  $48 c, $89 c, $df c,           \ mov rdi, rbx (dst)
+  $48 c, $89 c, $c1 c,           \ mov rcx, rax (count)
+  $f3 c, $a4 c,                  \ rep movsb
+  gen-3arg-promote ;
+
 : gen-fill ( -- )
   \ ( addr u char -- ) char=rax, u=rbx, addr=rcx or [r15]
-  \ rdi is free
   stack-depth @ 3 >= if
     $48 c, $89 c, $cf c,         \ mov rdi, rcx (addr from 3rd reg)
   else
@@ -518,23 +523,8 @@ variable fixup-target  0 fixup-target !
     $49 c, $83 c, $c7 c, 8 c,   \ add r15, 8
   then
   $48 c, $89 c, $d9 c,           \ mov rcx, rbx (count)
-  \ rax already has char (al used by stosb)
   $f3 c, $aa c,                  \ rep stosb
-  \ Promote remaining items (same pattern as move)
-  stack-depth @ 4 >= if
-    $49 c, $8b c, $07 c,
-    stack-depth @ 5 >= if
-      $49 c, $8b c, $5f c, 8 c,
-      stack-depth @ 6 >= if
-        $49 c, $8b c, $4f c, 16 c,
-      then
-    then
-    stack-depth @ 3 - dup 3 > if drop 3 then 8 *
-    dup 0> if
-      $49 c, $83 c, $c7 c, c,
-    else drop then
-  then
-  -3 stack-depth +! ;
+  gen-3arg-promote ;
 
 \ ============================================================
 \ ARITHMETIC
@@ -704,70 +694,30 @@ variable cmp-pending   0 cmp-pending !
   $48 c, $39 c, $c3 c,
   pop-nos ;
 
-: gen-= ( -- )
+: gen-setcc ( cc -- )
   gen-cmp-setup
-  $0f c, $94 c, $c0 c,
+  $0f c, c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
-: gen-<> ( -- )
-  gen-cmp-setup
-  $0f c, $95 c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
+: gen-= ( -- )   $94 gen-setcc ;
+: gen-<> ( -- )  $95 gen-setcc ;
+: gen-< ( -- )   $9c gen-setcc ;
+: gen-> ( -- )   $9f gen-setcc ;
+: gen-<= ( -- )  $9e gen-setcc ;
+: gen->= ( -- )  $9d gen-setcc ;
+: gen-u< ( -- )  $92 gen-setcc ;
 
-: gen-< ( -- )
-  gen-cmp-setup
-  $0f c, $9c c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-> ( -- )
-  gen-cmp-setup
-  $0f c, $9f c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-<= ( -- )
-  gen-cmp-setup
-  $0f c, $9e c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen->= ( -- )
-  gen-cmp-setup
-  $0f c, $9d c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-u< ( -- )
-  \ ( u1 u2 -- flag ) unsigned less-than
-  gen-cmp-setup                            \ cmp rbx, rax; pop-nos
-  $0f c, $92 c, $c0 c,                    \ setb al (unsigned below)
-  $48 c, $0f c, $b6 c, $c0 c,            \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;                  \ neg rax (true = -1)
-
-: gen-0= ( -- )
+: gen-test-setcc ( cc -- )
   $48 c, $85 c, $c0 c,
-  $0f c, $94 c, $c0 c,
+  $0f c, c, $c0 c,
   $48 c, $0f c, $b6 c, $c0 c,
   $48 c, $f7 c, $d8 c, ;
 
-: gen-0< ( -- )
-  $48 c, $c1 c, $f8 c, 63 c, ;
-
-: gen-0> ( -- )
-  $48 c, $85 c, $c0 c,
-  $0f c, $9f c, $c0 c,
-  $48 c, $0f c, $b6 c, $c0 c,
-  $48 c, $f7 c, $d8 c, ;
-
-: gen-0<> ( -- )
-  \ ( n -- flag ) true if n != 0
-  $48 c, $85 c, $c0 c,           \ test rax, rax
-  $0f c, $95 c, $c0 c,           \ setne al
-  $48 c, $0f c, $b6 c, $c0 c,   \ movzx rax, al
-  $48 c, $f7 c, $d8 c, ;        \ neg rax
+: gen-0= ( -- )  $94 gen-test-setcc ;
+: gen-0< ( -- )  $48 c, $c1 c, $f8 c, 63 c, ;
+: gen-0> ( -- )  $9f gen-test-setcc ;
+: gen-0<> ( -- ) $95 gen-test-setcc ;
 
 : gen-within ( -- )
   \ ( u lo hi -- flag ) true if lo <= u < hi
@@ -792,14 +742,6 @@ variable cmp-pending   0 cmp-pending !
   push-tos
   $48 c, $0f c, $b6 c, $03 c,     \ movzx rax, byte [rbx]
   $48 c, $ff c, $c3 c, ;          \ inc rbx
-
-: gen-/string ( -- )
-  \ ( addr u n -- addr+n u-n ) n=rax, u=rbx, addr=rcx
-  $48 c, $01 c, $c1 c,     \ add rcx, rax  (addr+n)
-  $48 c, $29 c, $c3 c,     \ sub rbx, rax  (u-n)
-  $48 c, $89 c, $d8 c,     \ mov rax, rbx  (u-n to TOS)
-  $48 c, $89 c, $cb c,     \ mov rbx, rcx  (addr+n to NOS)
-  -1 stack-depth +! ;
 
 : gen-min ( -- )
   \ ( a b -- min ) b=rax, a=rbx. cmp rbx,rax; cmovl rax,rbx
@@ -1085,6 +1027,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8d c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen->if ( -- orig )
@@ -1094,6 +1037,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $8e c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen-=if ( -- orig )
@@ -1103,6 +1047,7 @@ variable cmp-pending   0 cmp-pending !
   $4d c, $8d c, $7f c, 16 c,
   $0f c, $85 c,
   0 d,
+  -2 stack-depth +!
   code-here ;
 
 : gen-0<if ( -- orig )
@@ -1443,6 +1388,7 @@ variable current-word-addr  0 current-word-addr !
 
 : gen-recurse ( -- )
   arg-count @ call-nargs !
+  ret-count @ call-rets !
   current-word-addr @ gen-call ;
 
 : gen-tail-recurse ( -- )
@@ -1678,48 +1624,8 @@ variable start-jmp
   \ rax already has length
   1 stack-depth +! ;                        \ depth 1->2
 
-: gen-open-file ( -- )
+: gen-open-file-core ( extra-flags -- )
   \ ( addr u fam -- fileid ior )
-  \ fam=rax, u=rbx, addr=rcx or [r15]
-  \ Uses rt-word-buf as temp buffer for null-terminated path
-  1 has-io !
-  \ Save registers
-  stack-depth @ 3 >= if
-    $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
-  else
-    $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
-    $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
-  then
-  \ rsi=addr, rbx=len, rax=fam
-  \ Copy string to rt-word-buf and null-terminate
-  $50 c,                                    \ push rax (save fam)
-  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
-  $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
-  $f3 c, $a4 c,                            \ rep movsb (copy string)
-  $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0 (null-terminate)
-  \ Now call open syscall
-  $58 c,                                    \ pop rax (fam -> flags)
-  $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
-  $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf (path)
-  $ba c, 420 d,                            \ mov edx, 0644 (mode)
-  $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
-  $0f c, $05 c,                            \ syscall
-  \ rax = fd (>=0) or -errno (<0)
-  \ Convert to fileid + ior
-  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save fd)
-  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0 = success)
-  $48 c, $85 c, $db c,                     \ test rbx, rbx
-  $79 c, 6 c,                              \ jns +6 (skip if fd >= 0)
-  $48 c, $31 c, $db c,                     \ xor rbx, rbx (fileid = 0 on error)
-  $48 c, $ff c, $c8 c,                     \ dec rax (ior = -1 on error)
-  \ Stack result: rbx=fileid, rax=ior
-  \ Consumed 3 (addr u fam), produced 2 (fileid ior) = net -1
-  -1 stack-depth +!
-  ;
-
-: gen-create-file ( -- )
-  \ ( addr u fam -- fileid ior )
-  \ Like open-file but with O_CREAT | O_TRUNC added to flags
   1 has-io !
   stack-depth @ 3 >= if
     $48 c, $89 c, $ce c,                    \ mov rsi, rcx (addr from 3rd reg)
@@ -1727,27 +1633,28 @@ variable start-jmp
     $49 c, $8b c, $37 c,                    \ mov rsi, [r15] (addr from memory)
     $49 c, $83 c, $c7 c, 8 c,              \ add r15, 8
   then
-  \ rsi=addr, rbx=len, rax=fam
   $50 c,                                    \ push rax (save fam)
   $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
   $48 c, $89 c, $d9 c,                     \ mov rcx, rbx (len)
   $f3 c, $a4 c,                            \ rep movsb
   $c6 c, $07 c, 0 c,                       \ mov byte [rdi], 0
-  $58 c,                                    \ pop rax (fam)
-  $48 c, $0d c, 576 d,                     \ or rax, O_CREAT|O_TRUNC (64|512)
+  $58 c,                                    \ pop rax (fam -> flags)
+  ?dup if $48 c, $0d c, d, then            \ or rax, extra-flags (if any)
   $48 c, $89 c, $c6 c,                     \ mov rsi, rax (flags)
   $48 c, $bf c, rt-word-buf q,             \ mov rdi, rt-word-buf
   $ba c, 420 d,                            \ mov edx, 0644
   $b8 c, 2 d,                              \ mov eax, 2 (sys_open)
   $0f c, $05 c,                            \ syscall
-  $48 c, $89 c, $c3 c,                     \ mov rbx, rax
-  $48 c, $31 c, $c0 c,                     \ xor eax, eax
+  $48 c, $89 c, $c3 c,                     \ mov rbx, rax (save fd)
+  $48 c, $31 c, $c0 c,                     \ xor eax, eax (ior = 0)
   $48 c, $85 c, $db c,                     \ test rbx, rbx
   $79 c, 6 c,                              \ jns +6
   $48 c, $31 c, $db c,                     \ xor rbx, rbx
   $48 c, $ff c, $c8 c,                     \ dec rax
-  -1 stack-depth +!
-  ;
+  -1 stack-depth +! ;
+
+: gen-open-file ( -- )   0 gen-open-file-core ;
+: gen-create-file ( -- ) 576 gen-open-file-core ;
 
 : gen-close-file ( -- )
   \ ( fileid -- ior )
@@ -2328,7 +2235,6 @@ s" leave" s, 2constant $leave
 s" unloop" s, 2constant $unloop
 s" within" s, 2constant $within
 s" count" s, 2constant $count
-s" /string" s, 2constant $/string
 s" recurse" s, 2constant $recurse
 s" recursive" s, 2constant $recursive
 s" exit" s, 2constant $exit
@@ -2584,6 +2490,13 @@ variable num-neg
 \   ct-depth >= 1 → fold the constant
 \   ct-depth == 0 → normal codegen
 \ For everything else: ct-flush first, then normal codegen.
+: check-depth ( saved-depth label-addr label-u -- )
+  stack-depth @ 3 pick <> if
+    ." DEPTH " type ."  in "
+    dict-buf dict-count @ 1- 32 * + 24 type
+    ."  expected=" . ."  got=" stack-depth @ . cr
+  else 2drop drop then ;
+
 : compile-builtin ( addr u -- found? )
   \ ---- Stack manipulation: flush ct-stack first ----
   2dup $dup str= if 2drop flush-swap ct-flush
@@ -2839,14 +2752,14 @@ variable num-neg
     true exit
   then
   \ ---- Control flow: flush, then normal ----
-  2dup $if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-if cf-push true exit then
-  2dup $<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-<if cf-push true exit then
-  2dup $>if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen->if cf-push true exit then
-  2dup $=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-=if cf-push true exit then
-  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0<if cf-push true exit then
-  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending stack-depth @ cf-push gen-0=if cf-push true exit then
+  2dup $if str= if 2drop flush-swap ct-flush flush-pending gen-if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $<if str= if 2drop flush-swap ct-flush flush-pending gen-<if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $>if str= if 2drop flush-swap ct-flush flush-pending gen->if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $=if str= if 2drop flush-swap ct-flush flush-pending gen-=if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $0<if str= if 2drop flush-swap ct-flush flush-pending gen-0<if >r stack-depth @ cf-push r> cf-push true exit then
+  2dup $0=if str= if 2drop flush-swap ct-flush flush-pending gen-0=if >r stack-depth @ cf-push r> cf-push true exit then
   2dup $else str= if 2drop flush-swap ct-flush cf-pop gen-else cf-pop >r stack-depth @ cf-push r> stack-depth ! cf-push true exit then
-  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop stack-depth ! true exit then
+  2dup $then str= if 2drop flush-swap ct-flush cf-pop gen-then cf-pop dup s" then" check-depth stack-depth ! true exit then
   2dup $begin str= if 2drop flush-swap ct-flush gen-begin cf-push true exit then
   \ OPTIMIZATION 8: save dup-pending/cmp-pending BEFORE flush-swap clears them.
   \ Non-fused path emits gen-dup if dup was pending (e.g. dup until without 0>).
@@ -2896,7 +2809,6 @@ variable num-neg
   2dup $unloop str= if 2drop flush-swap ct-flush gen-unloop true exit then
   2dup $within str= if 2drop flush-swap ct-flush flush-pending gen-within true exit then
   2dup $count str= if 2drop flush-swap ct-flush gen-count true exit then
-  2dup $/string str= if 2drop flush-swap ct-flush gen-/string true exit then
   2dup $recursive str= if 2drop 1 is-recursive ! true exit then
   2dup $recurse str= if
     2drop flush-swap ct-flush 1 is-recursive ! code-here tail-recurse ! gen-recurse true exit then
@@ -2979,10 +2891,12 @@ variable scan-io
         input-buf input-pos @ 1+ + c@ [char] - = if
           drop 2 input-pos +! r> drop 1 >r
         else
+          drop
           begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
           r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
         then
       else
+        drop
         begin input-pos @ input-len @ < while input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat then
         r> dup if 1 scan-rets +! 0 scan-void ! then dup 0= if drop 1 scan-nargs +! 0 then >r
       then
@@ -3022,8 +2936,8 @@ variable scan-body-pos
   info-count @ info-entry >r
   r@ 40 0 fill                                     \ clear entire entry
   scan-name-buf r@ scan-name-len @ dup 23 > if drop 23 then move
-  scan-nargs @ 1 max r@ 24 + c!                    \ nargs at 24 (1 byte)
-  scan-rets @ 1 max r@ 25 + c!                      \ rets at 25 (1 byte)
+  scan-nargs @ r@ 24 + c!                          \ nargs at 24 (1 byte)
+  scan-rets @ 1+ r@ 25 + c!                        \ rets+1 at 25 (0=no comment)
   scan-io @ r@ 26 + c!                             \ flags at 26 (1 byte)
   \ call-count at 28 (2 bytes) - already 0 from fill
   scan-body-pos @ r@ 30 + !                        \ body-pos at 30 (4 bytes)
@@ -3042,7 +2956,7 @@ variable scan-body-pos
       dup 23 > if drop 23 then
       scan-name-buf over 0 fill
       scan-name-buf swap move
-      1 scan-void !  1 scan-nargs !  0 scan-io !
+      1 scan-void !  1 scan-nargs !  1 scan-rets !  0 scan-io !
       scan-stack-comment
       input-pos @ scan-body-pos !                  \ save body start position
       scan-body-io
@@ -3057,7 +2971,7 @@ variable scan-body-pos
   \ Check info-buf first (has call-count for future inlining)
   2dup info-find ?dup if
     dup 24 + c@ call-nargs !
-    dup 25 + c@ dup 0= if drop 1 then call-rets !
+    dup 25 + c@ dup 0= if drop 1 else 1- then call-rets !
     34 + @                             \ ( addr u code-addr )
     ?dup if                            \ code-addr != 0: word is compiled
       -rot 2drop                       \ ( code-addr )
@@ -3068,7 +2982,7 @@ variable scan-body-pos
   then
   \ User definitions - dict-find handles $800 stubs for variables/constants
   2dup dict-find ?dup if
-    nip nip flush-swap ct-flush
+    nip nip flush-swap ct-flush flush-cmp
     \ INLINE: variable/constant stubs → ct-push the literal value
     dup dict-flags @ $800 and if
       dict-addr @ $FFFFFFFF and 2 + code-buf + @ ct-push
@@ -3094,7 +3008,7 @@ variable scan-body-pos
   flush-swap ct-flush
   2dup info-find ?dup if
     dup 24 + c@ call-nargs !
-    dup 25 + c@ dup 0= if drop 1 then call-rets !
+    dup 25 + c@ dup 0= if drop 1 else 1- then call-rets !
     drop
   else
     1 call-nargs !  1 call-rets !
@@ -3104,52 +3018,7 @@ variable scan-body-pos
   code-here add-fixup ;
 
 variable is-void  0 is-void !
-variable ret-count 1 ret-count !
 
-: skip-ws-only ( -- )
-  begin
-    input-pos @ input-len @ >= if exit then
-    input-buf input-pos @ + c@ dup 32 <= swap 0 > and if
-      1 input-pos +!
-    else exit then
-  again ;
-
-: parse-stack-comment ( -- )
-  skip-ws-only
-  input-pos @ input-len @ >= if exit then
-  input-buf input-pos @ + c@ [char] ( <> if exit then
-  input-pos @ 1+ input-len @ >= if exit then
-  input-buf input-pos @ 1+ + c@ 32 > if exit then
-  1 input-pos +!
-  1 is-void !
-  0 arg-count !
-  0 ret-count !
-  0 >r
-  begin
-    skip-ws-only
-    input-pos @ input-len @ >= if r> drop exit then
-    input-buf input-pos @ + c@
-    dup [char] ) = if drop r> drop 1 input-pos +! exit then
-    dup [char] - = if
-      input-pos @ 1+ input-len @ < if
-        input-buf input-pos @ 1+ + c@ [char] - = if
-          drop 2 input-pos +! r> drop 1 >r
-        else
-          drop  \ drop the '-' char
-          begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-          r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-        then
-      else
-        drop  \ drop the '-' char
-        begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-        r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-      then
-    else
-      drop
-      begin input-buf input-pos @ + c@ 32 > while 1 input-pos +! repeat
-      r> dup if 0 is-void ! 1 ret-count +! then dup 0= if drop 1 arg-count +! 0 then >r
-    then
-  again ;
 
 : start-def ( addr u -- )
   0 ct-depth !
@@ -3159,17 +3028,19 @@ variable ret-count 1 ret-count !
   2drop
   code-here current-word-addr !
   0 has-io !
-  0 is-void !
   0 do-depth !
-  1 arg-count !
-  1 ret-count !
-  parse-stack-comment
+  0 scan-void !  1 scan-nargs !  1 scan-rets !
+  scan-stack-comment
+  scan-void @ is-void !
+  scan-nargs @ arg-count !
+  scan-rets @ ret-count !
   arg-count @ stack-depth !
   stack-depth @ start-depth !
   1 state ! ;
 
 : end-def ( -- )
   flush-swap ct-flush
+  ret-count @ s" enddef" check-depth
   tail-recurse @ ?dup if
     code-pos !
     gen-tail-recurse
@@ -3234,14 +3105,16 @@ create inc-input 8192 allot
     5 128 or $800 or dict-buf dict-count @ 1- 32 * + dict-flags !
     exit
   then
-  2dup $allot str= if
-    2drop interp-val @ data-here +! exit
-  then
-  2dup $, str= if
-    2drop interp-val @ data-here @ 8 add-init 8 data-here +! exit
-  then
-  2dup $c, str= if
-    2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
+  state @ 0= if
+    2dup $allot str= if
+      2drop interp-val @ data-here +! exit
+    then
+    2dup $, str= if
+      2drop interp-val @ data-here @ 8 add-init 8 data-here +! exit
+    then
+    2dup $c, str= if
+      2drop interp-val @ data-here @ 1 add-init 1 data-here +! exit
+    then
   then
   \ s, in interpret mode: string already in data area from s", just keep addr/len
   dup 2 = if over dup c@ [char] s = swap 1+ c@ [char] , = and if
@@ -3412,7 +3285,7 @@ create inc-input 8192 allot
   0 state !
   0 fixup-count !
   0 ct-depth !
-  DATA-BASE 24848 SLURP-SIZE + + data-here !
+  DATA-BASE 45328 SLURP-SIZE + + data-here !
   gen-prologue
   emit-rt-parse
   emit-rt-find

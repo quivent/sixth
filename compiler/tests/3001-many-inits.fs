@@ -1,6 +1,6 @@
 \ expect: 1234567890
-\ Test 3001: Many data initializations - stress INIT-MAX (4096)
-\ REGRESSION: Self-hosting crash may be triggered by overflowing init-buf.
+\ category: regression
+\ reason: stress INIT-MAX (4096) - self-hosting crash triggered by overflowing init-buf
 
 create data0 100 , 101 , 102 , 103 , 104 , 105 , 106 , 107 , 108 , 109 ,
 create data1 110 , 111 , 112 , 113 , 114 , 115 , 116 , 117 , 118 , 119 ,

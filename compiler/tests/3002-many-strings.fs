@@ -1,6 +1,6 @@
 \ expect: done
-\ Test 3002: Many string constants - stress string literal handling
-\ REGRESSION: Self-hosting crash may be triggered by many s" literals.
+\ category: regression
+\ reason: stress string literal handling - self-hosting crash triggered by many s" literals
 
 : s00 s" string constant number zero " drop drop ;
 : s01 s" string constant number one " drop drop ;

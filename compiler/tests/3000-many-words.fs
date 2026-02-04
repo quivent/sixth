@@ -1,6 +1,6 @@
 \ expect: 499
-\ Test 3000: Many word definitions - stress INFO-MAX (512)
-\ REGRESSION: Self-hosting crash may be triggered by exceeding info-buf.
+\ category: regression
+\ reason: stress INFO-MAX (512) - self-hosting crash triggered by exceeding info-buf
 
 : w001 ( -- n ) 1 ; : w002 ( -- n ) 2 ; : w003 ( -- n ) 3 ; : w004 ( -- n ) 4 ;
 : w005 ( -- n ) 5 ; : w006 ( -- n ) 6 ; : w007 ( -- n ) 7 ; : w008 ( -- n ) 8 ;
