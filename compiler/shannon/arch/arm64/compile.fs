@@ -317,6 +317,7 @@ variable pend-count  0 pend-count !
   2dup s" j" str= if 2drop emit-j true exit then
   2dup s" leave" str= if 2drop gen-leave true exit then
   2dup s" unloop" str= if 2drop emit-unloop true exit then
+  2dup s" exit" str= if 2drop emit-exit true exit then
   2drop false ;
 
 : compile-token ( addr u -- )

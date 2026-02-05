@@ -162,6 +162,10 @@ variable cf-sp  0 cf-sp !
   \ RET
   $D65F03C0 emit32 ;
 
+: emit-exit ( -- )
+  \ Early return from word - same as gen-ret
+  gen-ret ;
+
 \ ============================================================
 \ DO / LOOP CONTROL FLOW
 \ ============================================================
