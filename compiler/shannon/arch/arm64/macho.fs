@@ -13,11 +13,15 @@ variable main-entry   \ code-pos where 'main' starts (set by compile-colon)
 
 $4000 constant PAGE-SIZE
 32 constant HEADER-SIZE
-576 constant SIZEOFCMDS
-11 constant NCMDS
+648 constant SIZEOFCMDS    \ 576 + 72 for __DATA segment
+12 constant NCMDS          \ 11 + 1 for __DATA segment
 16 constant CODESIGN-PAD
-HEADER-SIZE SIZEOFCMDS + CODESIGN-PAD + constant CODE-OFFSET  \ 624
+HEADER-SIZE SIZEOFCMDS + CODESIGN-PAD + constant CODE-OFFSET  \ 696
 1 32 lshift constant VMADDR  \ 0x100000000
+
+\ Segment virtual addresses (contiguous, no gaps)
+VMADDR PAGE-SIZE + constant DATA-VMADDR      \ 0x100004000
+DATA-VMADDR PAGE-SIZE + constant LINKEDIT-VMADDR  \ 0x100008000
 
 \ LINKEDIT layout
 56 constant CHAINED-FIX-SIZE
@@ -98,10 +102,20 @@ variable code-sz
   $80000400 fd,
   0 fd, 0 fd, 0 fd, ;
 
+: write-data-segment ( -- )  \ 72 bytes (BSS-style, no file content)
+  $19 fd, 72 fd,                   \ LC_SEGMENT_64, cmdsize
+  s" __DATA" 16 fstr               \ segname
+  DATA-VMADDR fq,                  \ vmaddr = 0x100004000
+  PAGE-SIZE fq,                    \ vmsize = 1 page (address space reserved)
+  0 fq,                            \ fileoff = 0 (BSS)
+  0 fq,                            \ filesize = 0 (BSS)
+  3 fd, 3 fd,                      \ maxprot=rw-, initprot=rw-
+  0 fd, 0 fd, ;                    \ nsects=0, flags=0
+
 : write-linkedit ( -- )  \ 72 bytes
   $19 fd, 72 fd,
   s" __LINKEDIT" 16 fstr
-  VMADDR PAGE-SIZE + fq,
+  LINKEDIT-VMADDR fq,              \ vmaddr = 0x100008000
   PAGE-SIZE fq,
   PAGE-SIZE fq,
   LINKEDIT-FSIZE fq,
@@ -212,6 +226,7 @@ variable code-sz
   write-mach-header
   write-pagezero
   write-text-segment
+  write-data-segment
   write-linkedit
   write-dylinker
   write-build-version
