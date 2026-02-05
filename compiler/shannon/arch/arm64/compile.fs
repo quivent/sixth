@@ -168,6 +168,56 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   2drop false ;
 
 \ ============================================================
+\ FORWARD REFERENCES
+\ ============================================================
+\ Each pending ref: 16 bytes name (padded), 8 bytes call-site (code offset)
+24 constant PEND-ENTRY-SIZE
+create pend-buf 256 PEND-ENTRY-SIZE * allot
+variable pend-count  0 pend-count !
+
+: pend-entry ( n -- addr ) PEND-ENTRY-SIZE * pend-buf + ;
+
+: add-pending ( addr u call-site -- )
+  \ Record a forward reference: name at addr/u, BL at call-site
+  pend-count @ pend-entry    \ get entry address
+  dup 16 0 fill              \ clear name area
+  >r
+  r@ 16 + !                  \ store call-site at offset 16
+  r@ swap 16 min move        \ copy name (max 16 chars)
+  r> drop
+  1 pend-count +! ;
+
+: resolve-pending ( name-addr name-len target -- )
+  \ Patch all pending calls to this word
+  \ Scan backwards so we can remove resolved entries
+  pend-count @ 0 ?do
+    pend-count @ 1- i - pend-entry  \ iterate from end
+    >r
+    2dup r@ swap 16 min          \ ( name-addr name-len target entry name-addr len )
+    2swap drop                   \ ( name-addr name-len target name-addr len entry )
+    -rot                         \ ( name-addr name-len target entry name-addr len )
+    r@ dict-name= if             \ compare names
+      \ Match found - patch and mark for removal
+      dup r@ 16 + @              \ ( name-addr name-len target target call-site )
+      patch-call                 \ patch the BL instruction
+      \ Mark entry as resolved by zeroing name
+      r@ 16 0 fill
+    then
+    r> drop
+  loop
+  2drop drop ;
+
+: check-unresolved ( -- )
+  \ Error if any unresolved forward references remain
+  pend-count @ 0 ?do
+    i pend-entry c@ 0 <> if      \ non-zero first char = unresolved
+      ." Unresolved forward reference: "
+      i pend-entry 16 type cr
+      1 throw
+    then
+  loop ;
+
+\ ============================================================
 \ DISPATCH TABLE
 \ ============================================================
 
@@ -283,9 +333,9 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   2dup dict-find if
     nip nip gen-call exit
   then
-  \ Unknown token - error
-  ." Unknown word: " type cr
-  1 throw ;
+  \ Forward reference - emit placeholder BL, record for patching
+  code-here add-pending          \ record (name, call-site)
+  0 arm-bl emit32 ;              \ emit BL #0 placeholder
 
 \ ============================================================
 \ COLON DEFINITION COMPILER
@@ -304,7 +354,8 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
     again
   else
     \ Regular word - record address, save LR for nested calls
-    code-here dict-add         \ add to dictionary
+    2dup code-here dict-add    \ add to dictionary (keep name for resolve)
+    code-here resolve-pending  \ resolve any forward refs to this word
     gen-word-prologue          \ save LR to return stack
     begin
       get-token
@@ -337,6 +388,7 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
 
 : compile-string ( addr u -- )
   compile-source
+  check-unresolved
   build-macho ;
 
 \ ============================================================

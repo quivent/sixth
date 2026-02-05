@@ -68,6 +68,11 @@ variable cf-sp  0 cf-sp !
   rot or
   swap l! ;            \ write back (32-bit write)
 
+: patch-call ( target from -- )
+  \ Patch a BL instruction at 'from' to call 'target'
+  \ BL uses same offset encoding as B (26-bit signed, bits 25:0)
+  patch-branch-uncond ;
+
 \ ============================================================
 \ IF / THEN / ELSE
 \ ============================================================
