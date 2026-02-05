@@ -28,7 +28,7 @@
 #define TIB_SIZE      1024
 #define PAD_SIZE      4096
 #define MAX_FILES     16
-#define NAME_MAX_LEN  31
+#define NAME_MAX_LEN  63
 #define MAX_DICT      8192
 
 /* === Types === */

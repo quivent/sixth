@@ -244,18 +244,22 @@ DATA-BASE 45328 + constant rt-slurp-buf  \ slurp-file buffer (SLURP-SIZE bytes)
 \ ============================================================
 \ Order matters: each layer depends on previous layers.
 
-include compiler/shannon/asm.fs       \ Layer 0: x86-64 assembler
-include compiler/shannon/stack.fs     \ Layer 1: register-mapped stack
-include compiler/shannon/prims.fs     \ Layer 2a: primitive codegen
-include compiler/shannon/control.fs   \ Layer 2b: control flow codegen
-include compiler/shannon/rstack.fs    \ Layer 2c: return stack codegen
-include compiler/shannon/io.fs        \ Layer 2d: I/O codegen
+\ --- Architecture-specific layers (arch/x86/ or arch/arm64/) ---
+include compiler/shannon/arch/x86/asm.fs       \ Layer 0: instruction encoding
+include compiler/shannon/arch/x86/stack.fs     \ Layer 1: register-mapped stack
+include compiler/shannon/arch/x86/prims.fs     \ Layer 2a: primitive codegen
+include compiler/shannon/arch/x86/control.fs   \ Layer 2b: control flow codegen
+include compiler/shannon/arch/x86/rstack.fs    \ Layer 2c: return stack codegen
+include compiler/shannon/arch/x86/io.fs        \ Layer 2d: I/O codegen
+\ --- Architecture-independent layers ---
 include compiler/shannon/opt-fold.fs  \ Layer 3a: constant folding
 include compiler/shannon/opt-fuse.fs  \ Layer 3b: literal fusion
 include compiler/shannon/opt-swap.fs  \ Layer 3c: swap elimination
 include compiler/shannon/scan.fs      \ Pass 1: word metadata scanner
 include compiler/shannon/dispatch.fs  \ Builtin dispatch table
-include compiler/shannon/elf.fs       \ ELF binary generation
+\ --- Architecture-specific binary format ---
+include compiler/shannon/arch/x86/elf.fs       \ ELF binary generation
+\ --- Mixed layers (arch-specific bytes inline, port incrementally) ---
 include compiler/shannon/defs.fs      \ Data definitions (variable, constant, create)
 include compiler/shannon/strings.fs   \ String literals (s", .")
 include compiler/shannon/compile.fs   \ Layer 4: compilation orchestration

@@ -10,6 +10,7 @@
 #include <strings.h>
 #include <string.h>
 #include <signal.h>
+#include <unistd.h>
 
 static char last_name[64] = {0};
 static void crash_handler(int sig) {

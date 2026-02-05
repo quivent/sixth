@@ -190,8 +190,12 @@ static void p_thread_done(vm_t *vm) {
 
 /* NPROC ( -- n ) */
 static void p_nproc(vm_t *vm) {
+#ifdef _SC_NPROCESSORS_ONLN
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     push(vm, n > 0 ? n : 1);
+#else
+    push(vm, 1);
+#endif
 }
 
 /* Initialize spawn primitives */
