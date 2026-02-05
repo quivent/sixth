@@ -156,3 +156,85 @@ variable cf-sp  0 cf-sp !
   $F840879E emit32
   \ RET
   $D65F03C0 emit32 ;
+
+\ ============================================================
+\ DO / LOOP CONTROL FLOW
+\ ============================================================
+\ Return stack layout: ... limit index (index on top at [X28])
+\ Standard Forth: limit index do ... loop
+\ Loops while index < limit
+
+: gen-do ( -- orig dest )
+  \ ( limit index -- ) ( R: -- limit index )
+  \ Push limit first (NOS), then index (TOS), so index ends up on top
+  pop-nos                            \ X9 = limit (was NOS)
+  9 28 -8 arm-str-pre emit32         \ STR X9, [X28, #-8]! (push limit)
+  19 28 -8 arm-str-pre emit32        \ STR X19, [X28, #-8]! (push index)
+  emit-drop                          \ pop index from data stack
+  0                                  \ orig placeholder for leave (none yet)
+  code-here ;                        \ dest = loop body start
+  \ Return stack now: ... limit index  with [X28]=index, [X28,#8]=limit
+
+: gen-loop ( orig dest -- )
+  \ Increment index, compare with limit, branch back if index < limit
+  \ Return stack: [X28]=index, [X28+8]=limit (offset in cells, not bytes)
+  9 28 0 arm-ldr-off emit32          \ LDR X9, [X28] (index)
+  9 9 1 arm-add-imm emit32           \ ADD X9, X9, #1
+  9 28 0 arm-str-off emit32          \ STR X9, [X28] (store back)
+  10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit at offset 1*8)
+  \ Compare: if index < limit, continue looping
+  9 10 arm-cmp-reg emit32            \ CMP X9, X10 (index - limit)
+  \ B.LT back to dest
+  \ Stack: (orig dest)
+  code-here -                        \ offset = dest - code-here (bytes, negative)
+  4 /                                \ offset in instructions
+  $7FFFF and 5 lshift                \ mask to 19 bits, shift to position
+  $54000000 or                       \ B.cond base opcode
+  $B or                              \ cond = LT (0xB)
+  emit32
+  \ Clean up return stack: drop limit and index
+  28 28 16 arm-add-imm emit32        \ ADD X28, X28, #16
+  \ Handle any leave forward references
+  drop ;                             \ discard orig (no leaves implemented yet)
+
+: gen-+loop ( orig dest -- )
+  \ Add TOS to index, check for bounds crossing, branch back if not done
+  \ ( n -- ) adds n to index
+  \ Return stack: [X28]=index, [X28+8]=limit (offset in cells)
+  9 28 0 arm-ldr-off emit32          \ LDR X9, [X28] (old index)
+  10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit at offset 1*8)
+  \ new_index = old_index + n (TOS)
+  11 9 19 arm-add-reg emit32         \ ADD X11, X9, X19 (new index)
+  11 28 0 arm-str-off emit32         \ STR X11, [X28] (store new index)
+  emit-drop                          \ pop increment from data stack
+  \ Bounds check: loop exits when index crosses limit
+  \ For positive increment: exit when new_index >= limit
+  \ Simple version: just check new_index < limit (for positive loops)
+  11 10 arm-cmp-reg emit32           \ CMP X11, X10 (new_index - limit)
+  \ B.LT back to dest
+  \ Stack: (orig dest)
+  code-here -                        \ offset = dest - code-here (bytes, negative)
+  4 /                                \ offset in instructions
+  $7FFFF and 5 lshift                \ mask to 19 bits, shift to position
+  $54000000 or                       \ B.cond base opcode
+  $B or                              \ cond = LT
+  emit32
+  \ Clean up return stack
+  28 28 16 arm-add-imm emit32
+  drop ;                             \ discard orig
+
+: emit-i ( -- )  \ ( -- index ) copy current loop index to data stack
+  push-tos                           \ save TOS
+  19 28 0 arm-ldr-off emit32 ;       \ LDR X19, [X28] (index is on top)
+
+: emit-j ( -- )  \ ( -- index ) copy outer loop index to data stack
+  push-tos                           \ save TOS
+  19 28 2 arm-ldr-off emit32 ;       \ LDR X19, [X28, #16] (skip inner index+limit = 2*8)
+
+: emit-unloop ( -- )  \ ( R: limit index -- ) remove loop params from return stack
+  28 28 16 arm-add-imm emit32 ;      \ ADD X28, X28, #16
+
+: gen-leave ( -- )
+  \ Set index = limit to exit on next loop iteration
+  9 28 1 arm-ldr-off emit32          \ LDR X9, [X28, #8] (limit at offset 1*8)
+  9 28 0 arm-str-off emit32 ;        \ STR X9, [X28] (index = limit)

@@ -45,7 +45,7 @@
 \ Entry: set up data stack pointer and return stack pointer below SP
 : gen-prologue ( -- )
   22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack)
-  28 31 4096 arm-sub-imm emit32 ;   \ SUB X28, SP, #4096 (return stack)
+  28 31 3072 arm-sub-imm emit32 ;   \ SUB X28, SP, #3072 (return stack)
 
 \ Exit: TOS → exit code, terminate via SVC
 : gen-epilogue ( -- )

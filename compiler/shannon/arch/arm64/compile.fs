@@ -259,6 +259,14 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   2dup s" again" str= if 2drop cf-pop gen-again true exit then
   2dup s" while" str= if 2drop cf-pop gen-while cf-push cf-push true exit then
   2dup s" repeat" str= if 2drop cf-pop cf-pop gen-repeat true exit then
+  \ Do/loop control flow
+  2dup s" do" str= if 2drop gen-do cf-push cf-push true exit then
+  2dup s" loop" str= if 2drop cf-pop cf-pop gen-loop true exit then
+  2dup s" +loop" str= if 2drop cf-pop cf-pop gen-+loop true exit then
+  2dup s" i" str= if 2drop emit-i true exit then
+  2dup s" j" str= if 2drop emit-j true exit then
+  2dup s" leave" str= if 2drop gen-leave true exit then
+  2dup s" unloop" str= if 2drop emit-unloop true exit then
   2drop false ;
 
 : compile-token ( addr u -- )
