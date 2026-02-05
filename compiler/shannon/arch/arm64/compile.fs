@@ -218,6 +218,35 @@ variable pend-count  0 pend-count !
   loop ;
 
 \ ============================================================
+\ CONSTANTS
+\ ============================================================
+\ Each entry: 16 bytes name (padded), 8 bytes value
+24 constant CONST-ENTRY-SIZE
+create const-buf 128 CONST-ENTRY-SIZE * allot
+variable const-count  0 const-count !
+
+: const-entry ( n -- addr ) CONST-ENTRY-SIZE * const-buf + ;
+
+: const-add ( value addr u -- )
+  \ Add constant to table: value is TOS, name is addr/u
+  const-count @ const-entry    \ get entry address
+  dup 16 0 fill                \ clear name area
+  >r
+  r@ swap 16 min move          \ copy name (max 16 chars)
+  r@ 16 + !                    \ store value at offset 16
+  r> drop
+  1 const-count +! ;
+
+: const-find ( addr u -- value true | false )
+  \ Look up constant, return value if found
+  const-count @ 0 ?do
+    2dup i const-entry dict-name= if
+      2drop i const-entry 16 + @ true unloop exit
+    then
+  loop
+  2drop false ;
+
+\ ============================================================
 \ DISPATCH TABLE
 \ ============================================================
 
@@ -330,6 +359,10 @@ variable pend-count  0 pend-count !
   2dup try-compare if 2drop exit then
   2dup try-string if 2drop exit then
   2dup try-control if 2drop exit then
+  \ Check constants - emit literal value
+  2dup const-find if
+    nip nip emit-lit exit
+  then
   \ Check dictionary for word call
   2dup dict-find if
     nip nip gen-call exit
@@ -370,6 +403,19 @@ variable pend-count  0 pend-count !
 \ TOP-LEVEL COMPILER
 \ ============================================================
 
+: compile-constant ( -- )
+  \ Syntax: <value> constant <name>
+  \ At top-level, we parse: constant <name> <value>
+  \ This differs from standard Forth but is easier to parse
+  get-token                      \ get name
+  dup 0= if 2drop ." Missing constant name" cr 1 throw then
+  get-token                      \ get value
+  dup 0= if 2drop 2drop ." Missing constant value" cr 1 throw then
+  parse-number 0= if
+    ." Constant value must be a number" cr 1 throw
+  then
+  -rot const-add ;               \ ( value name-addr name-u -- )
+
 : compile-source ( addr u -- )
   \ Copy source to input buffer
   dup input-len !
@@ -383,7 +429,11 @@ variable pend-count  0 pend-count !
     2dup s" :" str= if
       2drop compile-colon
     else
-      2drop   \ skip unknown top-level tokens for now
+      2dup s" constant" str= if
+        2drop compile-constant
+      else
+        2drop   \ skip unknown top-level tokens for now
+      then
     then
   again ;
 
