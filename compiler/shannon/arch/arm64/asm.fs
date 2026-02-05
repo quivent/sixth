@@ -102,6 +102,14 @@ variable code-pos   0 code-pos !
 : arm-str-off ( rt rn imm12 -- insn )
   10 lshift swap 5 lshift or swap or $F9000000 or ;
 
+\ LDRB Wt, [Xn, #imm12]  (unsigned offset, byte, unscaled)
+: arm-ldrb-off ( rt rn imm12 -- insn )
+  10 lshift swap 5 lshift or swap or $39400000 or ;
+
+\ STRB Wt, [Xn, #imm12]  (unsigned offset, byte, unscaled)
+: arm-strb-off ( rt rn imm12 -- insn )
+  10 lshift swap 5 lshift or swap or $39000000 or ;
+
 \ ============================================================
 \ COMPARE INSTRUCTIONS
 \ ============================================================

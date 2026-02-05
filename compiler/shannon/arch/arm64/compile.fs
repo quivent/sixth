@@ -206,6 +206,12 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   2dup s" emit" str= if 2drop emit-emit true exit then
   2dup s" cr" str= if 2drop emit-cr true exit then
   2dup s" type" str= if 2drop emit-type true exit then
+  2dup s" @" str= if 2drop emit-@ true exit then
+  2dup s" !" str= if 2drop emit-! true exit then
+  2dup s" c@" str= if 2drop emit-c@ true exit then
+  2dup s" c!" str= if 2drop emit-c! true exit then
+  2dup s" +!" str= if 2drop emit-+! true exit then
+  2dup s" sp@" str= if 2drop emit-sp@ true exit then
   2drop false ;
 
 : try-compare ( addr u -- handled? )

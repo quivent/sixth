@@ -122,6 +122,37 @@
   19 28 0 arm-ldr-off emit32 ;       \ LDR X19, [X28] (no increment)
 
 \ ============================================================
+\ MEMORY OPERATIONS
+\ ============================================================
+
+: emit-@ ( -- )  \ ( addr -- value ) fetch 64-bit value
+  19 19 0 arm-ldr-off emit32 ;       \ LDR X19, [X19]
+
+: emit-! ( -- )  \ ( value addr -- ) store 64-bit value
+  pop-nos                            \ X9 = value (was NOS)
+  9 19 0 arm-str-off emit32          \ STR X9, [X19]
+  emit-drop ;                        \ TOS = next item
+
+: emit-c@ ( -- )  \ ( addr -- byte ) fetch byte (zero-extended)
+  19 19 0 arm-ldrb-off emit32 ;      \ LDRB W19, [X19]
+
+: emit-c! ( -- )  \ ( byte addr -- ) store byte
+  pop-nos                            \ X9 = byte (was NOS)
+  9 19 0 arm-strb-off emit32         \ STRB W9, [X19]
+  emit-drop ;                        \ TOS = next item
+
+: emit-+! ( -- )  \ ( n addr -- ) add n to memory cell
+  pop-nos                            \ X9 = n (was NOS)
+  10 19 0 arm-ldr-off emit32         \ LDR X10, [X19] (current value)
+  10 10 9 arm-add-reg emit32         \ ADD X10, X10, X9
+  10 19 0 arm-str-off emit32         \ STR X10, [X19]
+  emit-drop ;                        \ TOS = next item
+
+: emit-sp@ ( -- )  \ ( -- addr ) push data stack pointer
+  push-tos                           \ save current TOS
+  19 22 arm-mov-reg emit32 ;         \ MOV X19, X22
+
+\ ============================================================
 \ I/O OPERATIONS (macOS ARM64 syscalls)
 \ ============================================================
 
