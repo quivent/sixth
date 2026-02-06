@@ -1,0 +1,14 @@
+# Build artifacts
+target/
+dist/
+node_modules/
+
+# Generated files
+src-tauri/gen/
+
+# Runtime data
+*.db
+word-manifest.json
+
+# Cargo lock (app, not library)
+Cargo.lock

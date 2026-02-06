@@ -1,0 +1,391 @@
+<!-- ============================================================ -->
+<!-- PANEL 10: VOCABULARY                                          -->
+<!-- ============================================================ -->
+<div id="vocab-view" class="panel">
+<style>
+/* ---- VOCABULARY TAB STYLES ---- */
+.vocab-section { margin-bottom: 2rem; }
+.vocab-section h2 {
+  font-size: 1.3rem; color: #e0e0e0; border-bottom: 2px solid #333;
+  padding-bottom: 0.5rem; margin-bottom: 1rem;
+}
+.vocab-stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+.vocab-stat {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+  padding: 0.75rem 1.25rem; text-align: center;
+}
+.vocab-stat .vstat-val { font-size: 1.8rem; font-weight: 700; }
+.vocab-stat .vstat-lbl { font-size: 0.7rem; color: #999; text-transform: uppercase; letter-spacing: 1px; }
+.vocab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+.vocab-card {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+  padding: 1rem; overflow: hidden;
+}
+.vocab-card h3 { margin: 0 0 0.75rem 0; font-size: 1rem; color: #64b5f6; display: flex; align-items: center; justify-content: space-between; }
+.vocab-card h3 .count { font-size: 0.8rem; color: #999; font-weight: 400; }
+.word-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.word-chip {
+  font-family: monospace; font-size: 0.78rem; padding: 3px 8px;
+  border-radius: 3px; display: inline-block; cursor: default;
+}
+.chip-core { background: #1b5e20; color: #a5d6a7; }
+.chip-ext { background: #0d47a1; color: #90caf9; }
+.chip-shannon { background: #4a148c; color: #ce93d8; }
+.chip-fused { background: #bf360c; color: #ffab91; }
+.chip-eliminated { background: #333; color: #666; text-decoration: line-through; }
+.chip-unimpl { background: #1a1a2e; color: #555; border: 1px dashed #444; }
+
+/* Dispatch table */
+.dispatch-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: monospace; }
+.dispatch-table th { text-align: left; padding: 6px 10px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 1; }
+.dispatch-table td { padding: 5px 10px; border-bottom: 1px solid #1a1a2e; }
+.dispatch-table tr:hover { background: #1a1a2e; }
+.dispatch-container { max-height: 500px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; }
+.vocab-controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.vocab-controls input, .vocab-controls select {
+  background: #1a1a2e; border: 1px solid #333; color: #e0e0e0;
+  padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;
+}
+.flag-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; color: #000; font-weight: 600; }
+.flag-fold1 { background: #66bb6a; }
+.flag-fold2 { background: #42a5f5; }
+.flag-fold2c { background: #29b6f6; }
+.flag-commut { background: #26c6da; }
+.flag-stackop { background: #ab47bc; }
+.flag-io { background: #ffa726; }
+.flag-control { background: #ef5350; }
+.flag-memory { background: #8d6e63; }
+.flag-rstack { background: #78909c; }
+
+/* ANS reference */
+.ans-ref { font-size: 0.85rem; }
+.ans-ref table { width: 100%; border-collapse: collapse; }
+.ans-ref th { text-align: left; padding: 8px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; }
+.ans-ref td { padding: 6px 8px; border-bottom: 1px solid #222; }
+.ans-ref .supported { color: #4caf50; }
+.ans-ref .not-compiled { color: #ff9800; }
+.ans-ref .not-supported { color: #f44336; }
+</style>
+
+<!-- ========== VOCABULARY SUMMARY ========== -->
+<div class="vocab-stats">
+  <div class="vocab-stat"><div class="vstat-val" style="color: #4caf50;">163</div><div class="vstat-lbl">Dispatch Entries</div></div>
+  <div class="vocab-stat"><div class="vstat-val" style="color: #42a5f5;">~95</div><div class="vstat-lbl">Fully Compiled</div></div>
+  <div class="vocab-stat"><div class="vstat-val" style="color: #ff9800;">~60</div><div class="vstat-lbl">Registered Only</div></div>
+  <div class="vocab-stat"><div class="vstat-val" style="color: #ce93d8;">8</div><div class="vstat-lbl">Fused Compare+Branch</div></div>
+  <div class="vocab-stat"><div class="vstat-val" style="color: #ef5350;">5</div><div class="vstat-lbl">Optimization Passes</div></div>
+</div>
+
+<!-- ========== ANS FORTH CORE ========== -->
+<div class="vocab-section">
+  <h2>ANS Forth Core Wordset</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Standard words from the ANS Forth 1994 (DPANS94) CORE wordset. Green = compiled to native code. Orange = registered in dispatch but no compile handler. Gray = not supported.
+  </p>
+  <div class="vocab-grid">
+    <div class="vocab-card">
+      <h3>Stack Manipulation <span class="count">15 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">dup</span>
+        <span class="word-chip chip-core">drop</span>
+        <span class="word-chip chip-core">swap</span>
+        <span class="word-chip chip-core">over</span>
+        <span class="word-chip chip-core">rot</span>
+        <span class="word-chip chip-core">2dup</span>
+        <span class="word-chip chip-core">2drop</span>
+        <span class="word-chip chip-core">2swap</span>
+        <span class="word-chip chip-core">2over</span>
+        <span class="word-chip chip-core">?dup</span>
+        <span class="word-chip chip-core">depth</span>
+        <span class="word-chip chip-core">pick</span>
+        <span class="word-chip chip-ext">nip</span>
+        <span class="word-chip chip-ext">tuck</span>
+        <span class="word-chip chip-ext">-rot</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Arithmetic <span class="count">22 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">+</span>
+        <span class="word-chip chip-core">-</span>
+        <span class="word-chip chip-core">*</span>
+        <span class="word-chip chip-core">/</span>
+        <span class="word-chip chip-core">mod</span>
+        <span class="word-chip chip-core">/mod</span>
+        <span class="word-chip chip-core">negate</span>
+        <span class="word-chip chip-core">abs</span>
+        <span class="word-chip chip-core">1+</span>
+        <span class="word-chip chip-core">1-</span>
+        <span class="word-chip chip-core">2*</span>
+        <span class="word-chip chip-core">2/</span>
+        <span class="word-chip chip-core">cells</span>
+        <span class="word-chip chip-core">min</span>
+        <span class="word-chip chip-core">max</span>
+        <span class="word-chip chip-core">invert</span>
+        <span class="word-chip chip-core">and</span>
+        <span class="word-chip chip-core">or</span>
+        <span class="word-chip chip-core">xor</span>
+        <span class="word-chip chip-core">lshift</span>
+        <span class="word-chip chip-core">rshift</span>
+        <span class="word-chip chip-unimpl">*/</span>
+        <span class="word-chip chip-unimpl">*/mod</span>
+        <span class="word-chip chip-unimpl">um*</span>
+        <span class="word-chip chip-unimpl">m*</span>
+        <span class="word-chip chip-unimpl">um/mod</span>
+        <span class="word-chip chip-unimpl">sm/rem</span>
+        <span class="word-chip chip-unimpl">fm/mod</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Comparison <span class="count">10 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">=</span>
+        <span class="word-chip chip-core">&lt;</span>
+        <span class="word-chip chip-core">&gt;</span>
+        <span class="word-chip chip-core">0=</span>
+        <span class="word-chip chip-core">0&lt;</span>
+        <span class="word-chip chip-core">u&lt;</span>
+        <span class="word-chip chip-ext">0&gt;</span>
+        <span class="word-chip chip-ext">0&lt;&gt;</span>
+        <span class="word-chip chip-ext">&lt;&gt;</span>
+        <span class="word-chip chip-ext">&gt;=</span>
+        <span class="word-chip chip-ext">&lt;=</span>
+        <span class="word-chip chip-unimpl">within</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Memory <span class="count">8 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">@</span>
+        <span class="word-chip chip-core">!</span>
+        <span class="word-chip chip-core">c@</span>
+        <span class="word-chip chip-core">c!</span>
+        <span class="word-chip chip-core">+!</span>
+        <span class="word-chip chip-core">move</span>
+        <span class="word-chip chip-core">fill</span>
+        <span class="word-chip chip-core">/string</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Control Flow <span class="count">18 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">if</span>
+        <span class="word-chip chip-core">then</span>
+        <span class="word-chip chip-core">else</span>
+        <span class="word-chip chip-core">begin</span>
+        <span class="word-chip chip-core">while</span>
+        <span class="word-chip chip-core">repeat</span>
+        <span class="word-chip chip-core">until</span>
+        <span class="word-chip chip-core">again</span>
+        <span class="word-chip chip-core">do</span>
+        <span class="word-chip chip-core">loop</span>
+        <span class="word-chip chip-core">+loop</span>
+        <span class="word-chip chip-core">i</span>
+        <span class="word-chip chip-core">j</span>
+        <span class="word-chip chip-core">leave</span>
+        <span class="word-chip chip-core">unloop</span>
+        <span class="word-chip chip-core">exit</span>
+        <span class="word-chip chip-core">recurse</span>
+        <span class="word-chip chip-ext">?do</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Return Stack <span class="count">6 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">&gt;r</span>
+        <span class="word-chip chip-core">r&gt;</span>
+        <span class="word-chip chip-core">r@</span>
+        <span class="word-chip chip-core">2&gt;r</span>
+        <span class="word-chip chip-core">2r&gt;</span>
+        <span class="word-chip chip-core">2r@</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>I/O <span class="count">14 compiled</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">.</span>
+        <span class="word-chip chip-core">cr</span>
+        <span class="word-chip chip-core">emit</span>
+        <span class="word-chip chip-core">type</span>
+        <span class="word-chip chip-core">space</span>
+        <span class="word-chip chip-core">key</span>
+        <span class="word-chip chip-core">create-file</span>
+        <span class="word-chip chip-core">close-file</span>
+        <span class="word-chip chip-core">write-file</span>
+        <span class="word-chip chip-core">argc</span>
+        <span class="word-chip chip-core">argv</span>
+        <span class="word-chip chip-core">slurp-file</span>
+        <span class="word-chip chip-unimpl">spaces</span>
+        <span class="word-chip chip-unimpl">u.</span>
+        <span class="word-chip chip-unimpl">open-file</span>
+        <span class="word-chip chip-unimpl">read-file</span>
+        <span class="word-chip chip-unimpl">accept</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Definitions <span class="count">7 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">:</span>
+        <span class="word-chip chip-core">;</span>
+        <span class="word-chip chip-core">variable</span>
+        <span class="word-chip chip-core">constant</span>
+        <span class="word-chip chip-core">create</span>
+        <span class="word-chip chip-core">allot</span>
+        <span class="word-chip chip-core">include</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>String Literals <span class="count">4 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">s"</span>
+        <span class="word-chip chip-core">."</span>
+        <span class="word-chip chip-core">[char]</span>
+        <span class="word-chip chip-core">char</span>
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Constants <span class="count">6 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-core">bl</span>
+        <span class="word-chip chip-core">true</span>
+        <span class="word-chip chip-core">false</span>
+        <span class="word-chip chip-core">r/o</span>
+        <span class="word-chip chip-core">w/o</span>
+        <span class="word-chip chip-core">r/w</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== SHANNON-SPECIFIC WORDS ========== -->
+<div class="vocab-section">
+  <h2>Shannon-Specific Extensions</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Words unique to the Shannon compiler. Purple = Shannon extension. Red = fused compare+branch (optimization).
+  </p>
+  <div class="vocab-grid">
+    <div class="vocab-card">
+      <h3>Fused Compare+Branch <span class="count">8 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-fused">&lt;if</span>
+        <span class="word-chip chip-fused">&gt;if</span>
+        <span class="word-chip chip-fused">=if</span>
+        <span class="word-chip chip-fused">0&lt;if</span>
+        <span class="word-chip chip-fused">0=if</span>
+        <span class="word-chip chip-fused">0=until</span>
+        <span class="word-chip chip-fused">nzloop</span>
+        <span class="word-chip chip-fused">1-nzloop</span>
+      </div>
+      <div style="font-size: 0.78rem; color: #999; margin-top: 0.5rem;">
+        Each fuses a comparison + branch into a single conditional jump instruction.
+        Example: <code style="color: #ffab91;">&lt;if</code> = <code>cmp + jge</code> (one instruction instead of two)
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Shannon Stack Extensions <span class="count">3 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-shannon">nos+</span>
+        <span class="word-chip chip-shannon">tuck+</span>
+        <span class="word-chip chip-shannon">dup2</span>
+      </div>
+      <div style="font-size: 0.78rem; color: #999; margin-top: 0.5rem;">
+        Register-aware stack ops that exploit the TOS/NOS register model for better codegen.
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Shannon I/O Extensions <span class="count">3 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-shannon">slurp-file</span>
+        <span class="word-chip chip-shannon">argc</span>
+        <span class="word-chip chip-shannon">argv</span>
+      </div>
+      <div style="font-size: 0.78rem; color: #999; margin-top: 0.5rem;">
+        File slurping and command-line argument access (not in ANS).
+      </div>
+    </div>
+    <div class="vocab-card">
+      <h3>Double-Cell Arithmetic <span class="count">2 words</span></h3>
+      <div class="word-chips">
+        <span class="word-chip chip-shannon">d+</span>
+        <span class="word-chip chip-shannon">d-</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== DISPATCH FLAG REFERENCE ========== -->
+<div class="vocab-section">
+  <h2>Dispatch Flag System</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Every word in the dispatch table has a flag that controls how the optimizer treats it.
+    These flags drive constant folding, literal fusion, and swap elimination.
+  </p>
+  <table class="arch-table" style="max-width: 800px;">
+    <thead><tr><th>Flag</th><th>Value</th><th>Meaning</th><th>Optimization Triggered</th></tr></thead>
+    <tbody>
+      <tr><td><span class="flag-badge flag-fold1">F_FOLD1</span></td><td>1</td><td>Unary foldable</td><td>Constant folding with 1 arg</td></tr>
+      <tr><td><span class="flag-badge flag-fold2">F_FOLD2</span></td><td>2</td><td>Binary foldable</td><td>Constant folding with 2 args</td></tr>
+      <tr><td><span class="flag-badge flag-commut">F_COMMUT</span></td><td>4</td><td>Commutative</td><td>Swap absorption</td></tr>
+      <tr><td><span class="flag-badge flag-fold2c">F_FOLD2C</span></td><td>6</td><td>Binary + Commutative</td><td>Fold + swap absorb + literal fusion</td></tr>
+      <tr><td><span class="flag-badge flag-stackop">F_STACKOP</span></td><td>8</td><td>Stack manipulation</td><td>Special dup/swap tracking</td></tr>
+      <tr><td><span class="flag-badge flag-io">F_IO</span></td><td>16</td><td>I/O side effects</td><td>Prevents reordering</td></tr>
+      <tr><td><span class="flag-badge flag-control">F_CONTROL</span></td><td>32</td><td>Control flow</td><td>Branch generation</td></tr>
+      <tr><td><span class="flag-badge flag-memory">F_MEMORY</span></td><td>64</td><td>Memory access</td><td>Forces flush of pending ops</td></tr>
+      <tr><td><span class="flag-badge flag-rstack">F_RSTACK</span></td><td>128</td><td>Return stack</td><td>Return stack codegen</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== CHUCK MOORE'S MINIMAL FORTH ========== -->
+<div class="vocab-section">
+  <h2>Chuck Moore's Minimal Forth (colorForth kernel)</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Chuck Moore's minimal Forth kernel (~30 words). All are supported by Shannon.
+    This is the absolute minimum needed for a working Forth system.
+  </p>
+  <div class="vocab-card" style="max-width: 600px;">
+    <h3>Minimal Kernel <span class="count">~30 words</span></h3>
+    <div class="word-chips">
+      <span class="word-chip chip-core">dup</span>
+      <span class="word-chip chip-core">drop</span>
+      <span class="word-chip chip-core">swap</span>
+      <span class="word-chip chip-core">over</span>
+      <span class="word-chip chip-core">+</span>
+      <span class="word-chip chip-core">negate</span>
+      <span class="word-chip chip-core">and</span>
+      <span class="word-chip chip-core">or</span>
+      <span class="word-chip chip-core">xor</span>
+      <span class="word-chip chip-core">@</span>
+      <span class="word-chip chip-core">!</span>
+      <span class="word-chip chip-core">&gt;r</span>
+      <span class="word-chip chip-core">r&gt;</span>
+      <span class="word-chip chip-core">if</span>
+      <span class="word-chip chip-core">then</span>
+      <span class="word-chip chip-core">:</span>
+      <span class="word-chip chip-core">;</span>
+      <span class="word-chip chip-core">exit</span>
+      <span class="word-chip chip-core">emit</span>
+      <span class="word-chip chip-core">key</span>
+      <span class="word-chip chip-core">0=</span>
+      <span class="word-chip chip-core">execute</span>
+      <span class="word-chip chip-core">literal</span>
+      <span class="word-chip chip-core">begin</span>
+      <span class="word-chip chip-core">until</span>
+    </div>
+    <div style="font-size: 0.78rem; color: #4caf50; margin-top: 0.75rem; font-weight: 600;">
+      All 25+ minimal kernel words are fully compiled by Shannon.
+    </div>
+  </div>
+</div>
+
+<!-- ========== CHIP LEGEND ========== -->
+<div style="margin-top: 2rem; padding: 1rem; background: #111; border: 1px solid #333; border-radius: 4px; font-size: 0.82rem;">
+  <strong style="color: #e0e0e0;">Legend:</strong>
+  <span class="word-chip chip-core" style="margin-left: 1rem;">ANS Core</span>
+  <span class="word-chip chip-ext" style="margin-left: 0.5rem;">Core Extension</span>
+  <span class="word-chip chip-shannon" style="margin-left: 0.5rem;">Shannon-specific</span>
+  <span class="word-chip chip-fused" style="margin-left: 0.5rem;">Fused op</span>
+  <span class="word-chip chip-unimpl" style="margin-left: 0.5rem;">Registered, not compiled</span>
+</div>
+
+</div>

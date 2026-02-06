@@ -1,0 +1,331 @@
+<!-- ============================================================ -->
+<!-- PANEL 11: OPTIMIZATIONS                                       -->
+<!-- ============================================================ -->
+<div id="opt-view" class="panel">
+<style>
+/* ---- OPTIMIZATIONS TAB STYLES ---- */
+.opt-section { margin-bottom: 2rem; }
+.opt-section h2 {
+  font-size: 1.3rem; color: #e0e0e0; border-bottom: 2px solid #333;
+  padding-bottom: 0.5rem; margin-bottom: 1rem;
+}
+.opt-pipeline { display: flex; gap: 0; margin-bottom: 2rem; flex-wrap: wrap; }
+.opt-stage {
+  background: #1a1a2e; border: 1px solid #333; padding: 1rem;
+  min-width: 200px; flex: 1; position: relative;
+}
+.opt-stage:first-child { border-radius: 8px 0 0 8px; }
+.opt-stage:last-child { border-radius: 0 8px 8px 0; }
+.opt-stage::after {
+  content: '\2192'; position: absolute; right: -12px; top: 50%;
+  transform: translateY(-50%); color: #666; font-size: 1.5rem; z-index: 1;
+}
+.opt-stage:last-child::after { content: ''; }
+.opt-stage h3 { margin: 0 0 0.5rem 0; font-size: 0.95rem; }
+.opt-stage .stage-desc { font-size: 0.78rem; color: #999; }
+.opt-stage .stage-file { font-family: monospace; font-size: 0.75rem; color: #666; margin-top: 0.5rem; }
+.stage-a h3 { color: #66bb6a; }
+.stage-b h3 { color: #42a5f5; }
+.stage-c h3 { color: #ab47bc; }
+.stage-d h3 { color: #ffa726; }
+.stage-e h3 { color: #ef5350; }
+
+/* Operation tables */
+.opt-op-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.opt-op-table th { text-align: left; padding: 8px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; }
+.opt-op-table td { padding: 6px 8px; border-bottom: 1px solid #1a1a2e; font-family: monospace; vertical-align: top; }
+.opt-op-table tr:hover { background: #111828; }
+.opt-op-table .trigger { color: #999; font-size: 0.78rem; font-family: sans-serif; }
+.opt-op-table .codegen { color: #81c784; }
+.opt-op-table .special { color: #ffab91; font-size: 0.78rem; }
+
+/* Example boxes */
+.opt-example {
+  background: #0a0a1a; border: 1px solid #333; border-radius: 4px;
+  padding: 1rem; margin: 1rem 0; font-family: monospace; font-size: 0.82rem;
+}
+.opt-example .label { color: #999; font-size: 0.75rem; font-family: sans-serif; margin-bottom: 0.5rem; text-transform: uppercase; }
+.opt-example .before { color: #f44336; }
+.opt-example .after { color: #4caf50; }
+.opt-example .arrow { color: #666; margin: 0.5rem 0; }
+
+/* Strength reduction */
+.strength-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.strength-table th { text-align: left; padding: 8px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; }
+.strength-table td { padding: 6px 8px; border-bottom: 1px solid #1a1a2e; font-family: monospace; }
+
+/* ARM64 opportunity callouts */
+.arm64-callout {
+  background: #1a0a2e; border: 1px solid #4a148c; border-radius: 4px;
+  padding: 0.75rem 1rem; margin-top: 1rem; font-size: 0.82rem;
+}
+.arm64-callout .callout-title { color: #ce93d8; font-weight: 600; margin-bottom: 0.25rem; }
+.arm64-callout p { color: #999; margin: 0; }
+</style>
+
+<!-- ========== OPTIMIZATION PIPELINE OVERVIEW ========== -->
+<div class="opt-section">
+  <h2>Optimization Pipeline</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Shannon applies 5 optimization passes during compilation. Each pass operates during code generation (single-pass over the token stream), not as separate compilation stages.
+  </p>
+  <div class="opt-pipeline">
+    <div class="opt-stage stage-a">
+      <h3>A. Constant Folding</h3>
+      <div class="stage-desc">Evaluate compile-time constants. <code>3 4 + 2 *</code> &rarr; <code>14</code></div>
+      <div class="stage-file">opt-fold.fs (114 lines)</div>
+    </div>
+    <div class="opt-stage stage-b">
+      <h3>B. Literal Fusion</h3>
+      <div class="stage-desc">Fuse constant + op into immediate instruction. <code>x 8 *</code> &rarr; <code>shl 3</code></div>
+      <div class="stage-file">opt-fuse.fs (95 lines)</div>
+    </div>
+    <div class="opt-stage stage-c">
+      <h3>C. Swap Elimination</h3>
+      <div class="stage-desc">Absorb swaps before commutative ops. <code>swap +</code> &rarr; <code>+</code></div>
+      <div class="stage-file">opt-swap.fs (60 lines)</div>
+    </div>
+    <div class="opt-stage stage-d">
+      <h3>D. Dup Fusion</h3>
+      <div class="stage-desc">Defer dup for 0= fusion. <code>dup 0= if</code> &rarr; single test+branch</div>
+      <div class="stage-file">compile.fs (dup-pending)</div>
+    </div>
+    <div class="opt-stage stage-e">
+      <h3>E. Compare Fusion</h3>
+      <div class="stage-desc">Fuse compare + branch. <code>0= if</code> &rarr; <code>test+jz</code></div>
+      <div class="stage-file">compile.fs (cmp-pending)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== PASS A: CONSTANT FOLDING ========== -->
+<div class="opt-section">
+  <h2>Pass A: Constant Folding</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Maintains a compile-time stack (<code>ct-stack</code>, max 8 entries). When a foldable operation sees enough constants, it executes at compile time, emitting zero runtime code.
+  </p>
+  <table class="opt-op-table">
+    <thead><tr><th>Operation</th><th>CT Stack Effect</th><th>Trigger</th></tr></thead>
+    <tbody>
+      <tr><td>fold-add</td><td>( a b -- a+b )</td><td class="trigger">ct-depth &ge; 2, word is <code>+</code></td></tr>
+      <tr><td>fold-sub</td><td>( a b -- a-b )</td><td class="trigger">ct-depth &ge; 2, word is <code>-</code></td></tr>
+      <tr><td>fold-mul</td><td>( a b -- a*b )</td><td class="trigger">ct-depth &ge; 2, word is <code>*</code></td></tr>
+      <tr><td>fold-div</td><td>( a b -- a/b )</td><td class="trigger">ct-depth &ge; 2, word is <code>/</code></td></tr>
+      <tr><td>fold-mod</td><td>( a b -- a mod b )</td><td class="trigger">ct-depth &ge; 2, word is <code>mod</code></td></tr>
+      <tr><td>fold-and</td><td>( a b -- a&amp;b )</td><td class="trigger">ct-depth &ge; 2, word is <code>and</code></td></tr>
+      <tr><td>fold-or</td><td>( a b -- a|b )</td><td class="trigger">ct-depth &ge; 2, word is <code>or</code></td></tr>
+      <tr><td>fold-xor</td><td>( a b -- a^b )</td><td class="trigger">ct-depth &ge; 2, word is <code>xor</code></td></tr>
+      <tr><td>fold-lshift</td><td>( a b -- a&lt;&lt;b )</td><td class="trigger">ct-depth &ge; 2, word is <code>lshift</code></td></tr>
+      <tr><td>fold-rshift</td><td>( a b -- a&gt;&gt;b )</td><td class="trigger">ct-depth &ge; 2, word is <code>rshift</code></td></tr>
+      <tr><td>fold-negate</td><td>( a -- -a )</td><td class="trigger">ct-depth &ge; 1, word is <code>negate</code></td></tr>
+      <tr><td>fold-invert</td><td>( a -- ~a )</td><td class="trigger">ct-depth &ge; 1, word is <code>invert</code></td></tr>
+      <tr><td>fold-1+</td><td>( a -- a+1 )</td><td class="trigger">ct-depth &ge; 1, word is <code>1+</code></td></tr>
+      <tr><td>fold-1-</td><td>( a -- a-1 )</td><td class="trigger">ct-depth &ge; 1, word is <code>1-</code></td></tr>
+      <tr><td>fold-2*</td><td>( a -- a*2 )</td><td class="trigger">ct-depth &ge; 1, word is <code>2*</code></td></tr>
+      <tr><td>fold-2/</td><td>( a -- a/2 )</td><td class="trigger">ct-depth &ge; 1, word is <code>2/</code></td></tr>
+    </tbody>
+  </table>
+  <div class="opt-example">
+    <div class="label">Example: Constant expression folded at compile time</div>
+    <div class="before">Source: <code>3 4 + 2 *</code></div>
+    <div class="arrow">&darr; Folded to single literal</div>
+    <div class="after">Emitted: <code>mov rax, 14</code> (one instruction, zero runtime arithmetic)</div>
+  </div>
+  <div class="arm64-callout">
+    <div class="callout-title">ARM64 Opportunity</div>
+    <p>Constant folding is architecture-independent &mdash; it operates on the compile-time stack, not on machine instructions. The fold pass works identically on ARM64. Only the final <code>emit-lit</code> changes (MOVZ/MOVK sequence instead of MOV reg, imm64).</p>
+  </div>
+</div>
+
+<!-- ========== PASS B: LITERAL FUSION ========== -->
+<div class="opt-section">
+  <h2>Pass B: Literal Fusion</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    When ct-depth = 1 (one compile-time constant) and a binary op is seen, fuse the literal into an immediate-form instruction. This avoids a separate push + register-register op.
+  </p>
+  <table class="opt-op-table">
+    <thead><tr><th>Operation</th><th>x86 Codegen</th><th>Special Cases</th></tr></thead>
+    <tbody>
+      <tr><td>fuse-add</td><td class="codegen">add rax, imm</td><td></td></tr>
+      <tr><td>fuse-sub</td><td class="codegen">sub rax, imm</td><td></td></tr>
+      <tr><td>fuse-mul</td><td class="codegen">imul rax, rax, imm</td><td class="special">*0 &rarr; xor rax,rax | *1 &rarr; nop | *2^n &rarr; shl n</td></tr>
+      <tr><td>fuse-and</td><td class="codegen">and rax, imm</td><td></td></tr>
+      <tr><td>fuse-or</td><td class="codegen">or rax, imm</td><td></td></tr>
+      <tr><td>fuse-xor</td><td class="codegen">xor rax, imm</td><td class="special">^0 &rarr; nop | ^-1 &rarr; not rax</td></tr>
+      <tr><td>fuse-lshift</td><td class="codegen">shl rax, imm</td><td></td></tr>
+      <tr><td>fuse-rshift</td><td class="codegen">shr rax, imm</td><td></td></tr>
+      <tr><td>fuse-arshift</td><td class="codegen">sar rax, imm</td><td></td></tr>
+    </tbody>
+  </table>
+  <div class="opt-example">
+    <div class="label">Example: Multiply by 8 strength-reduced</div>
+    <div class="before">Source: <code>x 8 *</code></div>
+    <div class="before">Without fusion: <code>mov rbx, rax; mov rax, 8; imul rax, rbx</code> (3 instructions)</div>
+    <div class="arrow">&darr; power-of-2 detected, fused to shift</div>
+    <div class="after">With fusion: <code>shl rax, 3</code> (1 instruction)</div>
+  </div>
+  <div class="arm64-callout">
+    <div class="callout-title">ARM64 Adaptation</div>
+    <p>ARM64 has rich immediate forms: ADD Xd, Xn, #imm12 (12-bit), shifted immediates, and bitmask immediates for AND/OR/XOR. The fusion logic stays the same; only the emit functions change. ARM64 actually has <strong>more</strong> immediate encoding options than x86.</p>
+  </div>
+</div>
+
+<!-- ========== PASS C: SWAP ELIMINATION ========== -->
+<div class="opt-section">
+  <h2>Pass C: Swap Elimination</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Tracks pending <code>swap</code> operations. Instead of emitting <code>xchg</code>, the swap is deferred. If the next operation is commutative, the swap is absorbed (zero cost).
+  </p>
+  <table class="opt-op-table">
+    <thead><tr><th>Pattern</th><th>Optimization</th><th>Codegen</th></tr></thead>
+    <tbody>
+      <tr><td>swap +</td><td>Swap absorbed (+ is commutative)</td><td class="codegen">add rax, rbx</td></tr>
+      <tr><td>swap *</td><td>Swap absorbed</td><td class="codegen">imul rax, rbx</td></tr>
+      <tr><td>swap and</td><td>Swap absorbed</td><td class="codegen">and rax, rbx</td></tr>
+      <tr><td>swap or</td><td>Swap absorbed</td><td class="codegen">or rax, rbx</td></tr>
+      <tr><td>swap xor</td><td>Swap absorbed</td><td class="codegen">xor rax, rbx</td></tr>
+      <tr><td>swap swap</td><td>Both eliminated</td><td class="codegen">(nothing emitted)</td></tr>
+      <tr><td>swap -</td><td>Reverse subtract on NOS</td><td class="codegen">sub rbx, rax; mov rax, rbx</td></tr>
+      <tr><td>swap negate</td><td>Negate NOS instead</td><td class="codegen">neg rbx</td></tr>
+      <tr><td>swap 1+</td><td>Increment NOS</td><td class="codegen">inc rbx</td></tr>
+      <tr><td>swap 1-</td><td>Decrement NOS</td><td class="codegen">dec rbx</td></tr>
+      <tr><td>swap &lt;other&gt;</td><td>Flush: emit actual swap</td><td class="codegen">xchg rax, rbx; then &lt;other&gt;</td></tr>
+    </tbody>
+  </table>
+  <div class="arm64-callout">
+    <div class="callout-title">ARM64 Advantage</div>
+    <p>ARM64 has 3-operand instructions (ADD Xd, Xn, Xm), so many "swap" situations simply become operand reordering in the instruction encoding. The swap elimination pass becomes even more effective &mdash; most swaps can be absorbed by swapping register operands in the ARM64 instruction.</p>
+  </div>
+</div>
+
+<!-- ========== PASSES D & E: FUSION ========== -->
+<div class="opt-section">
+  <h2>Passes D & E: Dup Fusion + Compare Fusion</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    These passes defer <code>dup</code> and comparison operations to fuse them with following branches.
+  </p>
+  <table class="opt-op-table">
+    <thead><tr><th>Pattern</th><th>Without Fusion</th><th>With Fusion</th><th>Savings</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>dup 0= if</td>
+        <td>push rax; test rax,rax; setz al; movzx rax; test rax,rax; jz</td>
+        <td class="codegen">test rax, rax; jz</td>
+        <td class="special">4 instructions saved</td>
+      </tr>
+      <tr>
+        <td>0= if</td>
+        <td>test rax,rax; setz al; movzx; test; jz</td>
+        <td class="codegen">test rax, rax; jz</td>
+        <td class="special">3 instructions saved</td>
+      </tr>
+      <tr>
+        <td>0&lt; if</td>
+        <td>test; sets; movzx; test; jz</td>
+        <td class="codegen">test rax, rax; js</td>
+        <td class="special">3 instructions saved</td>
+      </tr>
+      <tr>
+        <td>&lt; if (&lt;if)</td>
+        <td>cmp; setl; movzx; test; jz</td>
+        <td class="codegen">cmp rbx, rax; jge</td>
+        <td class="special">3 instructions saved</td>
+      </tr>
+      <tr>
+        <td>&gt; if (&gt;if)</td>
+        <td>cmp; setg; movzx; test; jz</td>
+        <td class="codegen">cmp rbx, rax; jle</td>
+        <td class="special">3 instructions saved</td>
+      </tr>
+      <tr>
+        <td>= if (=if)</td>
+        <td>cmp; sete; movzx; test; jz</td>
+        <td class="codegen">cmp rbx, rax; jne</td>
+        <td class="special">3 instructions saved</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="arm64-callout">
+    <div class="callout-title">ARM64 Adaptation</div>
+    <p>ARM64 has condition codes set by CMP and conditional branch instructions (B.EQ, B.NE, B.LT, etc.). The fusion pattern maps directly: <code>CMP X19, X20; B.GE target</code>. ARM64 also has <code>CBZ</code> and <code>CBNZ</code> (compare-and-branch-if-zero/nonzero) which fuse even more tightly.</p>
+  </div>
+</div>
+
+<!-- ========== STRENGTH REDUCTION ========== -->
+<div class="opt-section">
+  <h2>Strength Reduction (within Literal Fusion)</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    Special cases within fuse-mul and fuse-xor that replace expensive operations with cheaper ones.
+  </p>
+  <table class="strength-table">
+    <thead><tr><th>Pattern</th><th>Reduced To</th><th>Why Cheaper</th></tr></thead>
+    <tbody>
+      <tr><td>x * 0</td><td>xor rax, rax</td><td>Zero without a multiply</td></tr>
+      <tr><td>x * 1</td><td>(nothing)</td><td>Identity, no instruction needed</td></tr>
+      <tr><td>x * 2</td><td>shl rax, 1</td><td>Shift is 1 cycle, multiply is 3+</td></tr>
+      <tr><td>x * 4</td><td>shl rax, 2</td><td>Shift is 1 cycle</td></tr>
+      <tr><td>x * 8</td><td>shl rax, 3</td><td>Shift is 1 cycle (cells on 64-bit)</td></tr>
+      <tr><td>x * 2^n</td><td>shl rax, n</td><td>Any power-of-2 becomes shift</td></tr>
+      <tr><td>x xor 0</td><td>(nothing)</td><td>Identity</td></tr>
+      <tr><td>x xor -1</td><td>not rax</td><td>Complement without xor imm</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== OPTIMIZATION OPPORTUNITIES FOR ARM64 ========== -->
+<div class="opt-section">
+  <h2>ARM64-Specific Optimization Opportunities</h2>
+  <p style="color: #999; font-size: 0.85rem; margin-bottom: 1rem;">
+    ARM64 opens new optimization paths not available on x86-64.
+  </p>
+  <div class="vocab-grid">
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">STP/LDP Paired Operations</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        ARM64 can store/load two 64-bit registers in a single instruction.
+        <code>push-val</code> can use <code>STP X19, X20, [X22, #-16]!</code> to push TOS+NOS simultaneously.
+        x86 requires two separate <code>mov [r15], rax; sub r15, 8</code> sequences.
+      </div>
+    </div>
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">CBZ/CBNZ (Compare-Branch-Zero)</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        <code>0= if</code> becomes a single <code>CBZ X19, target</code> instruction (4 bytes).
+        x86 needs <code>test rax, rax; jz target</code> (5+ bytes, 2 instructions).
+      </div>
+    </div>
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">7 Scratch Registers</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        ARM64 has X9-X15 as caller-saved temporaries (7 registers).
+        x86 has only RAX, RCX, RDX as easily available scratch (~3).
+        This means fewer spills to memory during complex expressions.
+      </div>
+    </div>
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">Bitmask Immediates</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        ARM64 AND/OR/EOR accept bitmask immediates that encode repeating patterns.
+        <code>and rax, 0xFF</code> (x86: 5-7 bytes) becomes <code>AND X19, X19, #0xFF</code> (4 bytes).
+        Many mask operations become single instructions.
+      </div>
+    </div>
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">Conditional Select (CSEL)</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        ARM64 <code>CSEL Xd, Xn, Xm, cond</code> replaces entire if/then/else sequences for simple value selection.
+        <code>min</code> and <code>max</code> become: <code>CMP X19, X20; CSEL X19, X19, X20, LT</code> (2 instructions, no branch).
+      </div>
+    </div>
+    <div class="vocab-card" style="border-left: 4px solid #ce93d8;">
+      <h3 style="color: #ce93d8;">MADD/MSUB (Multiply-Add)</h3>
+      <div style="font-size: 0.82rem; color: #999;">
+        ARM64 <code>MADD Xd, Xn, Xm, Xa</code> computes <code>Xa + Xn*Xm</code> in one instruction.
+        Patterns like <code>a b * c +</code> could be fused to a single MADD.
+        x86 has no equivalent (requires separate mul + add).
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>

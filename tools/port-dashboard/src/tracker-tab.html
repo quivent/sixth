@@ -1,0 +1,581 @@
+<!-- ============================================================ -->
+<!-- PANEL 9: PRODUCTION TRACKER                                    -->
+<!-- ============================================================ -->
+<div id="tracker-view" class="panel">
+<style>
+/* ---- TRACKER TAB STYLES ---- */
+.tracker-section { margin-bottom: 2rem; }
+.tracker-section h2 {
+  font-size: 1.3rem; color: #e0e0e0; border-bottom: 2px solid #333;
+  padding-bottom: 0.5rem; margin-bottom: 1rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.tracker-section h2 .badge {
+  font-size: 0.75rem; padding: 2px 8px; border-radius: 10px;
+  color: #000; font-weight: 700;
+}
+.badge-done { background: #4caf50; }
+.badge-active { background: #ff9800; }
+.badge-pending { background: #666; color: #ccc !important; }
+.badge-locked { background: #9c27b0; }
+
+/* Architecture decisions table */
+.arch-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.arch-table th { text-align: left; padding: 8px 12px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; }
+.arch-table td { padding: 8px 12px; border-bottom: 1px solid #222; vertical-align: top; }
+.arch-table tr:hover { background: #1a1a2e; }
+.arch-table .decision-label { color: #e0e0e0; font-weight: 600; white-space: nowrap; }
+.arch-table .decision-value { color: #81c784; font-family: monospace; }
+.arch-table .decision-rationale { color: #999; font-size: 0.8rem; }
+.lock-icon { color: #9c27b0; margin-right: 4px; }
+
+/* File inventory */
+.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }
+.file-card {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+  padding: 1rem; position: relative; overflow: hidden;
+}
+.file-card.done { border-left: 4px solid #4caf50; }
+.file-card.active { border-left: 4px solid #ff9800; }
+.file-card.pending { border-left: 4px solid #666; }
+.file-card.stub { border-left: 4px solid #2196f3; }
+.file-card.unchanged { border-left: 4px solid #607d8b; }
+.file-card h3 { margin: 0 0 0.5rem 0; font-size: 1rem; color: #e0e0e0; font-family: monospace; }
+.file-card .file-meta { font-size: 0.8rem; color: #999; display: flex; gap: 1rem; flex-wrap: wrap; }
+.file-card .file-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.file-card .progress-bar { height: 4px; background: #333; border-radius: 2px; margin-top: 0.75rem; overflow: hidden; }
+.file-card .progress-bar .fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.fill-done { background: #4caf50; }
+.fill-active { background: #ff9800; }
+
+/* Word tracker table */
+.word-tracker-controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+.word-tracker-controls input {
+  background: #1a1a2e; border: 1px solid #333; color: #e0e0e0;
+  padding: 6px 12px; border-radius: 4px; font-size: 0.85rem; min-width: 200px;
+}
+.word-tracker-controls select {
+  background: #1a1a2e; border: 1px solid #333; color: #e0e0e0;
+  padding: 6px 12px; border-radius: 4px; font-size: 0.85rem;
+}
+.word-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: monospace; }
+.word-table th { text-align: left; padding: 6px 10px; background: #1a1a2e; color: #64b5f6; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 1; }
+.word-table td { padding: 5px 10px; border-bottom: 1px solid #1a1a2e; }
+.word-table tr:hover { background: #1a1a2e; }
+.word-table .status-done { color: #4caf50; }
+.word-table .status-pending { color: #ff9800; }
+.word-table .status-redesign { color: #2196f3; }
+.word-table .status-eliminated { color: #f44336; text-decoration: line-through; }
+.word-table-container { max-height: 500px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; }
+
+/* Summary stats row */
+.tracker-stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+.tracker-stat {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+  padding: 1rem 1.5rem; min-width: 120px; text-align: center;
+}
+.tracker-stat .stat-value { font-size: 2rem; font-weight: 700; }
+.tracker-stat .stat-label { font-size: 0.75rem; color: #999; text-transform: uppercase; letter-spacing: 1px; }
+.stat-green { color: #4caf50; }
+.stat-orange { color: #ff9800; }
+.stat-blue { color: #2196f3; }
+.stat-red { color: #f44336; }
+.stat-gray { color: #607d8b; }
+.stat-purple { color: #9c27b0; }
+
+/* Phase gates */
+.phase-gate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+.phase-gate-card {
+  background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+  padding: 1rem; position: relative;
+}
+.phase-gate-card h4 { margin: 0 0 0.5rem 0; color: #e0e0e0; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem; }
+.gate-list { list-style: none; padding: 0; margin: 0; }
+.gate-list li { padding: 4px 0; font-size: 0.82rem; color: #999; display: flex; align-items: flex-start; gap: 6px; }
+.gate-list li.satisfied { color: #4caf50; }
+.gate-check { font-size: 0.9rem; flex-shrink: 0; }
+
+/* Production log */
+.prod-log { font-family: monospace; font-size: 0.82rem; background: #0a0a1a; border: 1px solid #333; border-radius: 4px; padding: 1rem; max-height: 400px; overflow-y: auto; }
+.prod-log .log-entry { padding: 4px 0; border-bottom: 1px solid #111; display: flex; gap: 1rem; }
+.prod-log .log-date { color: #666; white-space: nowrap; min-width: 80px; }
+.prod-log .log-type { font-weight: 600; min-width: 70px; }
+.log-type-arch { color: #9c27b0; }
+.log-type-file { color: #2196f3; }
+.log-type-word { color: #4caf50; }
+.log-type-test { color: #ff9800; }
+.log-type-gate { color: #e91e63; }
+</style>
+
+<!-- ========== SUMMARY STATS ========== -->
+<div class="tracker-stats" id="tracker-stats">
+  <!-- Populated by script -->
+</div>
+
+<!-- ========== ARCHITECTURE DECISIONS (LOCKED) ========== -->
+<div class="tracker-section">
+  <h2>Architecture Decisions <span class="badge badge-locked">LOCKED</span></h2>
+  <table class="arch-table">
+    <thead><tr><th>Decision</th><th>Value</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> TOS Register</td>
+        <td class="decision-value">X19</td>
+        <td class="decision-rationale">Callee-saved. Survives function calls. No need for save/restore around SVC.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> NOS Register</td>
+        <td class="decision-value">X20</td>
+        <td class="decision-rationale">Callee-saved. Paired with TOS for STP/LDP efficiency.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> 3rd Register</td>
+        <td class="decision-value">X21</td>
+        <td class="decision-rationale">Callee-saved. Three stack registers cover most Forth word needs.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Stack Pointer</td>
+        <td class="decision-value">X22</td>
+        <td class="decision-rationale">Callee-saved. Points to memory data stack (not hardware SP).</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Return Stack</td>
+        <td class="decision-value">X28</td>
+        <td class="decision-rationale">Callee-saved. Dedicated return stack pointer (like x86 R12).</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Scratch Registers</td>
+        <td class="decision-value">X9-X15</td>
+        <td class="decision-rationale">Caller-saved temporaries. 7 available vs x86's 2-3. Major optimization advantage.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> CODE-BASE</td>
+        <td class="decision-value">0x100000000</td>
+        <td class="decision-rationale">macOS standard __TEXT segment virtual address for 64-bit binaries.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Binary Format</td>
+        <td class="decision-value">Mach-O (LC_MAIN dynamic)</td>
+        <td class="decision-rationale">NOT static. Requires dyld, libSystem.B.dylib stub. LC_UNIXTHREAD rejected.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Code Signing</td>
+        <td class="decision-value">Ad-hoc (codesign -f -s -)</td>
+        <td class="decision-rationale">Required for macOS ARM64 execution. 16-byte padding reserved for signature insertion.</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Instruction Size</td>
+        <td class="decision-value">Fixed 32-bit</td>
+        <td class="decision-rationale">All ARM64 instructions are exactly 4 bytes. No variable-length decoding. emit32 replaces c,/d,</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> System Calls</td>
+        <td class="decision-value">SVC #0x80</td>
+        <td class="decision-rationale">macOS ARM64 uses SVC not SWI. Syscall numbers are 0x2000000+N (Unix class prefix).</td>
+      </tr>
+      <tr>
+        <td class="decision-label"><span class="lock-icon">&#128274;</span> Build Strategy</td>
+        <td class="decision-value">Ground-up (not line-by-line port)</td>
+        <td class="decision-rationale">ARM64 files written from scratch. x86 files are REFERENCE, not SOURCE. Different ISAs need different approaches.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== FILE INVENTORY ========== -->
+<div class="tracker-section">
+  <h2>File Inventory <span class="badge badge-active" id="file-inv-badge">1/7 created</span></h2>
+  <div class="file-grid" id="file-inventory">
+    <!-- Populated by script -->
+  </div>
+</div>
+
+<!-- ========== WORD TRACKER ========== -->
+<div class="tracker-section">
+  <h2>Word Tracker <span class="badge badge-active" id="word-tracker-badge">1/237</span></h2>
+  <div class="word-tracker-controls">
+    <input type="text" id="word-search" placeholder="Search words..." oninput="filterWords()">
+    <select id="word-filter-file" onchange="filterWords()">
+      <option value="">All files</option>
+      <option value="asm.fs">asm.fs (86 words)</option>
+      <option value="stack.fs">stack.fs (29 words)</option>
+      <option value="prims.fs">prims.fs (72 words)</option>
+      <option value="control.fs">control.fs (28 words)</option>
+      <option value="io.fs">io.fs (10 words)</option>
+      <option value="elf.fs">elf.fs / macho.fs (6 words)</option>
+      <option value="rstack.fs">rstack.fs (6 words)</option>
+    </select>
+    <select id="word-filter-status" onchange="filterWords()">
+      <option value="">All statuses</option>
+      <option value="done">Done</option>
+      <option value="pending">Pending</option>
+      <option value="redesign">Redesign</option>
+      <option value="eliminated">Eliminated</option>
+    </select>
+  </div>
+  <div class="word-table-container">
+    <table class="word-table" id="word-tracker-table">
+      <thead><tr><th>Word</th><th>File</th><th>Phase</th><th>Status</th><th>ARM64 Notes</th></tr></thead>
+      <tbody id="word-tracker-body">
+        <!-- Populated by script -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ========== PHASE GATES ========== -->
+<div class="tracker-section">
+  <h2>Phase Gates <span class="badge badge-active" id="phase-gate-badge">Phase 0 complete</span></h2>
+  <div class="phase-gate-grid" id="phase-gates">
+    <!-- Populated by script -->
+  </div>
+</div>
+
+<!-- ========== PRODUCTION LOG ========== -->
+<div class="tracker-section">
+  <h2>Production Log <span class="badge badge-pending">Live</span></h2>
+  <div class="prod-log" id="production-log">
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-file">FILE</span><span>tools/macho-test.c created (439 lines) - Reference Mach-O binary generator</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>C tool emits Mach-O ARM64 exit(42) binary - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>Reference binary runs on macOS: codesign + execute - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>otool -l shows 11 load commands (LC_MAIN) - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>Arithmetic test (6*7=42) passes - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>Hello world (write syscall) passes - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-gate">GATE</span><span>Reference hex dump saved for diffing - PASSED</span></div>
+    <div class="log-entry"><span class="log-date">Phase 0</span><span class="log-type log-type-arch">ARCH</span><span>12 architecture decisions LOCKED (registers, binary format, syscalls)</span></div>
+    <div class="log-entry"><span class="log-date">Phase 1</span><span class="log-type log-type-file">FILE</span><span>arch/arm64/asm.fs created (39 lines, STUB) - Register constants + emit32</span></div>
+    <div class="log-entry"><span class="log-date">Phase 1</span><span class="log-type log-type-word">WORD</span><span>emit32 ( u -- ) defined in arch/arm64/asm.fs - 1/86 asm words</span></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ===== USE WORD_DATA from the existing global (defined later in the HTML) =====
+  // We'll initialize after DOMContentLoaded to ensure WORD_DATA is available.
+
+  function initTracker() {
+    const words = window.WORD_DATA || [];
+    if (!words.length) {
+      // Retry in 500ms if WORD_DATA isn't loaded yet
+      setTimeout(initTracker, 500);
+      return;
+    }
+
+    // ===== COMPUTE STATS =====
+    const total = words.length;
+    const done = words.filter(w => w.status === 'done').length;
+    const pending = words.filter(w => w.status === 'pending').length;
+    const redesign = words.filter(w => w.status === 'redesign').length;
+    const eliminated = words.filter(w => w.status === 'eliminated').length;
+    const pctDone = total > 0 ? Math.round((done / (total - eliminated)) * 100) : 0;
+
+    // ===== SUMMARY STATS =====
+    const statsEl = document.getElementById('tracker-stats');
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <div class="tracker-stat"><div class="stat-value stat-green">${done}</div><div class="stat-label">Done</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-orange">${pending}</div><div class="stat-label">Pending</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-blue">${redesign}</div><div class="stat-label">Redesign</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-red">${eliminated}</div><div class="stat-label">Eliminated</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-gray">${total}</div><div class="stat-label">Total Words</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-purple">${pctDone}%</div><div class="stat-label">Progress</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-green">1</div><div class="stat-label">Phases Done</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-orange">10</div><div class="stat-label">Phases Total</div></div>
+      `;
+    }
+
+    // ===== FILE INVENTORY (LIVE FROM BACKEND) =====
+    loadFileInventory();
+
+    // ===== WORD TRACKER TABLE =====
+    const wordBody = document.getElementById('word-tracker-body');
+    if (wordBody) {
+      populateWordTable(words);
+    }
+
+    const wordBadge = document.getElementById('word-tracker-badge');
+    if (wordBadge) wordBadge.textContent = `${done}/${total - eliminated} ported`;
+
+    // ===== PHASE GATES =====
+    const phases = [
+      { id: 0, name: 'Foundation', status: 'done', gates: [
+        { text: 'C tool emits Mach-O ARM64 exit(42) binary', ok: true },
+        { text: 'Reference binary runs on macOS: codesign + execute', ok: true },
+        { text: 'otool -l shows 11 load commands (LC_MAIN)', ok: true },
+        { text: 'Arithmetic test (6*7=42) passes', ok: true },
+        { text: 'Hello world (write syscall) passes', ok: true },
+        { text: 'Reference hex dump saved for diffing', ok: true },
+      ]},
+      { id: 1, name: 'asm.fs', status: 'active', gates: [
+        { text: 'Register constants X0-X30, FP, LR, SP defined', ok: true },
+        { text: 'emit32 emits 4-byte little-endian instruction', ok: true },
+        { text: 'MOV, ADD, SUB, AND, ORR, EOR encode correctly', ok: false },
+        { text: 'MOVZ/MOVK sequence loads 64-bit immediates', ok: false },
+        { text: 'LDR/STR with register offset and immediate offset', ok: false },
+        { text: 'B, BL, B.cond, CBZ, CBNZ branch instructions', ok: false },
+        { text: 'SVC #0x80 system call encoding', ok: false },
+        { text: 'test-asm.fs passes all encoding tests', ok: false },
+      ]},
+      { id: 2, name: 'macho.fs', status: 'pending', gates: [
+        { text: 'Forth-generated macho.fs produces exit(42) matching Phase 0 reference', ok: false },
+        { text: 'otool -l shows correct LC_MAIN with entryoff=624', ok: false },
+        { text: 'xxd diff against reference: zero differences in header', ok: false },
+        { text: '__TEXT segment vmaddr = 0x100000000', ok: false },
+        { text: 'LINKEDIT contains chained fixups + exports trie', ok: false },
+        { text: 'Code signing succeeds (codesign -f -s -)', ok: false },
+      ]},
+      { id: 3, name: 'stack.fs', status: 'pending', gates: [
+        { text: 'TOS/NOS/3rd mapped to X19/X20/X21', ok: false },
+        { text: 'push-val uses STP for paired stores', ok: false },
+        { text: 'pop-val uses LDP for paired loads', ok: false },
+        { text: 'emit-lit handles 16-bit, 32-bit, 64-bit immediates', ok: false },
+        { text: 'Stack depth tracking correct through all paths', ok: false },
+        { text: 'test-stack.fs passes all stack operation tests', ok: false },
+      ]},
+      { id: 4, name: 'prims.fs', status: 'pending', gates: [
+        { text: 'Arithmetic: emit-add/sub/mul/div generate correct ARM64', ok: false },
+        { text: 'Comparison: emit-</>/=/0= use CMP+CSET correctly', ok: false },
+        { text: 'Memory: emit-@/!/c@/c! use LDR/STR correctly', ok: false },
+        { text: 'Bitwise: emit-and/or/xor/invert/lshift/rshift work', ok: false },
+        { text: 'test-prims.fs passes all primitive tests', ok: false },
+      ]},
+      { id: 5, name: 'control.fs', status: 'pending', gates: [
+        { text: 'gen-if/then/else use B.cond with correct patching', ok: false },
+        { text: 'gen-begin/until/again/while/repeat work', ok: false },
+        { text: 'gen-do/loop/+loop use correct loop counter in register', ok: false },
+        { text: 'gen-leave patches all LEAVE addresses', ok: false },
+        { text: 'All branch offsets correct (26-bit for B, 19-bit for B.cond)', ok: false },
+      ]},
+      { id: 6, name: 'io.fs', status: 'pending', gates: [
+        { text: 'gen-emit outputs character via write(1, buf, 1)', ok: false },
+        { text: 'gen-type outputs string via write(1, addr, len)', ok: false },
+        { text: 'gen-key reads character via read(0, buf, 1)', ok: false },
+        { text: 'gen-create-file/close-file/write-file use correct macOS syscalls', ok: false },
+        { text: 'Syscall numbers use 0x2000000+N prefix', ok: false },
+      ]},
+      { id: 7, name: 'rstack.fs + mixed', status: 'pending', gates: [
+        { text: 'gen->r/r>/r@ use X28 as return stack pointer', ok: false },
+        { text: 'gen-2>r/2r>/2r@ handle paired values', ok: false },
+        { text: 'defs.fs conditionally loads ARM64 register constants', ok: false },
+        { text: 'strings.fs alignment correct for ARM64', ok: false },
+      ]},
+      { id: 8, name: 'main.fs integration', status: 'pending', gates: [
+        { text: 'main.fs loads arch/arm64/ files via conditional include', ok: false },
+        { text: 'compile.fs dispatches to ARM64 code generation', ok: false },
+        { text: 'Simple programs compile to valid ARM64 Mach-O binaries', ok: false },
+        { text: 'test suite passes (CFAIL=0, WRONG=0)', ok: false },
+      ]},
+      { id: 9, name: 'Test Suite', status: 'pending', gates: [
+        { text: 'All existing tests pass on ARM64', ok: false },
+        { text: 'ARM64-specific tests added and passing', ok: false },
+        { text: 'Hayes test suite passes on ARM64', ok: false },
+      ]},
+      { id: 10, name: 'Self-hosting', status: 'pending', gates: [
+        { text: 'Shannon compiles Shannon on ARM64 macOS', ok: false },
+        { text: 'Output binary matches when compiled by x86 cross-compiler', ok: false },
+      ]},
+    ];
+
+    const phaseGates = document.getElementById('phase-gates');
+    if (phaseGates) {
+      let html = '';
+      phases.forEach(p => {
+        const satisfied = p.gates.filter(g => g.ok).length;
+        const total = p.gates.length;
+        const statusClass = p.status === 'done' ? 'badge-done' : p.status === 'active' ? 'badge-active' : 'badge-pending';
+        html += `
+          <div class="phase-gate-card">
+            <h4>
+              <span class="badge ${statusClass}">${p.status.toUpperCase()}</span>
+              Phase ${p.id}: ${p.name}
+              <span style="margin-left: auto; font-size: 0.8rem; color: #999;">${satisfied}/${total}</span>
+            </h4>
+            <ul class="gate-list">
+              ${p.gates.map(g => `
+                <li class="${g.ok ? 'satisfied' : ''}">
+                  <span class="gate-check">${g.ok ? '&#9745;' : '&#9744;'}</span>
+                  ${g.text}
+                </li>
+              `).join('')}
+            </ul>
+          </div>`;
+      });
+      phaseGates.innerHTML = html;
+
+      const phaseBadge = document.getElementById('phase-gate-badge');
+      const donePhases = phases.filter(p => p.status === 'done').length;
+      if (phaseBadge) phaseBadge.textContent = `${donePhases}/${phases.length} phases complete`;
+    }
+  }
+
+  async function loadFileInventory() {
+    const fileGrid = document.getElementById('file-inventory');
+    if (!fileGrid) return;
+
+    // Descriptions for each file (keyed by short name)
+    const descs = {
+      'asm.fs': 'ARM64 assembler: instruction encoding, register ops, addressing modes',
+      'macho.fs': 'Mach-O binary format: headers, load commands, segments, code signing',
+      'elf.fs': 'ELF binary format: headers, program headers, sections',
+      'stack.fs': 'Data stack operations: push/pop/dup/swap/over with register caching',
+      'prims.fs': 'Primitive word code generation: arithmetic, memory, comparison',
+      'control.fs': 'Control flow: if/then/else, begin/until/again, do/loop, leave',
+      'io.fs': 'I/O primitives: emit, type, key, file operations via syscalls',
+      'rstack.fs': 'Return stack: >r, r>, r@, 2>r, 2r>, 2r@',
+      'defs.fs': 'Shared definitions - needs conditional register constants',
+      'strings.fs': 'String handling - may need alignment adjustments',
+      'compile.fs': 'Compiler core - needs arch dispatch for code generation',
+      'main.fs': 'Main entry - needs arch/arm64/ include path',
+      'scan.fs': 'Two-pass scanner - architecture-independent',
+      'dispatch.fs': 'Word dispatch table - architecture-independent',
+      'opt-fold.fs': 'Constant folding - architecture-independent',
+      'opt-fuse.fs': 'Instruction fusion - architecture-independent',
+      'opt-swap.fs': 'Swap optimization - architecture-independent',
+    };
+
+    try {
+      // Call Tauri backend for live file inventory
+      const files = await window.__TAURI__.core.invoke('get_file_inventory');
+
+      // Separate by category
+      const arm64Files = files.filter(f => f.category === 'arch-arm64');
+      const x86Files = files.filter(f => f.category === 'arch-x86');
+      const sharedFiles = files.filter(f => f.category === 'shared');
+      const unchangedFiles = files.filter(f => f.category === 'unchanged');
+
+      let html = '';
+
+      // ARM64 files
+      html += '<h3 style="grid-column: 1/-1; color: #64b5f6; font-size: 0.9rem; margin: 0 0 0.5rem 0;">ARM64 Port Files (Ground-up Implementation)</h3>';
+      arm64Files.forEach(f => {
+        const shortName = f.name.split('/').pop();
+        const desc = descs[shortName] || '';
+        const pct = f.x86_words > 0 ? Math.round((f.word_defs / f.x86_words) * 100) : 0;
+        const statusClass = f.status === 'active' ? 'active' : f.status === 'stub' ? 'stub' : f.status === 'pending' ? 'pending' : 'done';
+        html += `
+          <div class="file-card ${statusClass}" onclick="openCodeViewer('${f.name}')" style="cursor:pointer;">
+            <h3>${f.name}</h3>
+            <div style="font-size: 0.82rem; color: #ccc; margin-bottom: 0.5rem;">${desc}</div>
+            <div class="file-meta">
+              <span>Phase ${f.phase}</span>
+              <span>x86 ref: ${f.x86_lines} lines, ${f.x86_words} words</span>
+              <span style="color: #4caf50;">${f.lines} lines, ${f.word_defs} words</span>
+              <span style="color: ${pct >= 50 ? '#4caf50' : pct > 0 ? '#ff9800' : '#666'};">${pct}% ported</span>
+            </div>
+            <div class="progress-bar"><div class="fill ${pct >= 50 ? 'fill-done' : 'fill-active'}" style="width: ${Math.min(pct, 100)}%;"></div></div>
+            ${f.words.length > 0 ? `<div style="font-size: 0.75rem; color: #666; margin-top: 0.5rem;">Words: ${f.words.slice(0, 8).join(', ')}${f.words.length > 8 ? '...' : ''}</div>` : ''}
+          </div>`;
+      });
+
+      // x86 reference files
+      html += '<h3 style="grid-column: 1/-1; color: #9c27b0; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">x86 Reference Files (Source of Truth)</h3>';
+      x86Files.forEach(f => {
+        const shortName = f.name.split('/').pop();
+        const desc = descs[shortName] || '';
+        html += `
+          <div class="file-card done" onclick="openCodeViewer('${f.name}')" style="cursor:pointer; border-left-color: #9c27b0;">
+            <h3>${f.name}</h3>
+            <div style="font-size: 0.82rem; color: #ccc; margin-bottom: 0.5rem;">${desc}</div>
+            <div class="file-meta">
+              <span>Phase ${f.phase}</span>
+              <span>${f.lines} lines</span>
+              <span>${f.word_defs} words</span>
+              <span>${f.constants} constants</span>
+            </div>
+            ${f.words.length > 0 ? `<div style="font-size: 0.75rem; color: #666; margin-top: 0.5rem;">Words: ${f.words.slice(0, 8).join(', ')}${f.words.length > 8 ? '...' : ''}</div>` : ''}
+          </div>`;
+      });
+
+      // Shared files
+      html += '<h3 style="grid-column: 1/-1; color: #ff9800; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">Shared Files (Patch for ARM64)</h3>';
+      sharedFiles.forEach(f => {
+        const shortName = f.name.split('/').pop() || f.name;
+        const desc = descs[shortName] || '';
+        html += `
+          <div class="file-card active" onclick="openCodeViewer('${f.name}')" style="cursor:pointer;">
+            <h3>${f.name}</h3>
+            <div style="font-size: 0.82rem; color: #ccc; margin-bottom: 0.5rem;">${desc}</div>
+            <div class="file-meta">
+              <span>${f.lines} lines</span>
+              <span>${f.word_defs} words</span>
+              <span style="color: #ff9800;">Needs patching</span>
+            </div>
+          </div>`;
+      });
+
+      // Unchanged files
+      html += '<h3 style="grid-column: 1/-1; color: #607d8b; font-size: 0.9rem; margin: 1rem 0 0.5rem 0;">Unchanged Files (Architecture-Independent)</h3>';
+      unchangedFiles.forEach(f => {
+        html += `
+          <div class="file-card unchanged" onclick="openCodeViewer('${f.name}')" style="cursor:pointer;">
+            <h3>${f.name}</h3>
+            <div class="file-meta">
+              <span>${f.lines} lines</span>
+              <span style="color: #607d8b;">No changes needed</span>
+            </div>
+          </div>`;
+      });
+
+      fileGrid.innerHTML = html;
+
+      // Update badge with ARM64 progress
+      const createdCount = arm64Files.filter(f => f.lines > 0).length;
+      const totalArm64 = arm64Files.length;
+      const badge = document.getElementById('file-inv-badge');
+      if (badge) badge.textContent = `${createdCount}/${totalArm64} ARM64 files created`;
+
+    } catch (err) {
+      console.error('Failed to load file inventory:', err);
+      fileGrid.innerHTML = `<div style="color: #f44336;">Error loading file inventory: ${err}</div>`;
+    }
+  }
+
+  function populateWordTable(words) {
+    const body = document.getElementById('word-tracker-body');
+    if (!body) return;
+    let html = '';
+    words.forEach(w => {
+      const statusClass = 'status-' + w.status;
+      const statusLabel = w.status.charAt(0).toUpperCase() + w.status.slice(1);
+      html += `<tr data-word="${w.word}" data-file="${w.file}" data-status="${w.status}">
+        <td style="color: #e0e0e0; font-weight: 600;">${w.word}</td>
+        <td style="color: #999;">${w.file}</td>
+        <td style="color: #999;">Phase ${w.phase}</td>
+        <td class="${statusClass}">${statusLabel}</td>
+        <td style="color: #777; font-size: 0.78rem; max-width: 350px;">${w.note || ''}</td>
+      </tr>`;
+    });
+    body.innerHTML = html;
+  }
+
+  window.filterWords = function() {
+    const search = (document.getElementById('word-search')?.value || '').toLowerCase();
+    const fileFilter = document.getElementById('word-filter-file')?.value || '';
+    const statusFilter = document.getElementById('word-filter-status')?.value || '';
+    const rows = document.querySelectorAll('#word-tracker-body tr');
+    rows.forEach(row => {
+      const word = row.dataset.word || '';
+      const file = row.dataset.file || '';
+      const status = row.dataset.status || '';
+      const matchSearch = !search || word.toLowerCase().includes(search);
+      const matchFile = !fileFilter || file === fileFilter;
+      const matchStatus = !statusFilter || status === statusFilter;
+      row.style.display = (matchSearch && matchFile && matchStatus) ? '' : 'none';
+    });
+  };
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(initTracker, 100));
+  } else {
+    setTimeout(initTracker, 100);
+  }
+
+  // Re-initialize when word data is updated via Tauri
+  window.addEventListener('word-data-updated', () => setTimeout(initTracker, 100));
+})();
+</script>
+
+</div>
