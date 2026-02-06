@@ -23,8 +23,7 @@ for test in tools/arm64-tests/phase*.fs; do
         continue
     fi
     
-    # Sign
-    codesign -fs - /tmp/arm64-test 2>/dev/null
+    # Binary is already signed by save-binary, no additional signing needed
     
     # Run and capture output
     output=$(/tmp/arm64-test 2>&1)

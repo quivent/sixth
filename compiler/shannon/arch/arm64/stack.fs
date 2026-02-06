@@ -42,11 +42,24 @@
 \ PROLOGUE / EPILOGUE
 \ ============================================================
 
-\ Entry: set up data stack pointer, return stack pointer, and variable base
-: gen-prologue ( -- )
+\ Entry: set up data stack pointer, return stack pointer, variable base, and here
+\ Memory layout:
+\   [X20 + 0] = here pointer (initialized to X20 + here-offset)
+\   [X20 + 8 ...] = variable storage, then here-allocated data
+: gen-prologue ( here-offset -- )
   22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack)
   28 31 3072 arm-sub-imm emit32     \ SUB X28, SP, #3072 (return stack)
-  20 31 4080 arm-sub-imm emit32 ;   \ SUB X20, SP, #4080 (variable base, ~1KB)
+  20 31 4080 arm-sub-imm emit32     \ SUB X20, SP, #4080 (variable/here base)
+  \ Initialize here pointer: [X20] = X20 + here-offset
+  dup $1000 < if
+    9 20 rot arm-add-imm emit32     \ ADD X9, X20, #offset (fits in imm12)
+  else
+    \ Large offset: load into X9 then add to X20
+    dup $FFFF and 9 swap 0 arm-movz emit32
+    16 rshift $FFFF and ?dup if 9 swap 16 arm-movk emit32 then
+    9 20 9 arm-add-reg emit32       \ ADD X9, X20, X9
+  then
+  9 20 0 arm-str-off emit32 ;       \ STR X9, [X20] (store initial here)
 
 \ Emit variable address: push X20+offset to TOS
 : emit-var-addr ( offset -- )
@@ -171,6 +184,35 @@
   19 22 arm-mov-reg emit32 ;         \ MOV X19, X22
 
 \ ============================================================
+\ DICTIONARY WORDS (here, allot, ,, c,)
+\ ============================================================
+\ here pointer is stored at [X20], data starts at [X20+8]
+
+: emit-here ( -- )  \ ( -- addr ) push current here pointer
+  push-tos                           \ save current TOS
+  19 20 0 arm-ldr-off emit32 ;       \ LDR X19, [X20] (here pointer)
+
+: emit-allot ( -- )  \ ( n -- ) advance here by n bytes
+  9 20 0 arm-ldr-off emit32          \ LDR X9, [X20] (load here)
+  9 9 19 arm-add-reg emit32          \ ADD X9, X9, X19 (here += n)
+  9 20 0 arm-str-off emit32          \ STR X9, [X20] (store new here)
+  emit-drop ;                        \ drop n from stack
+
+: emit-comma ( -- )  \ ( x -- ) store cell at here, advance by 8
+  9 20 0 arm-ldr-off emit32          \ LDR X9, [X20] (load here)
+  19 9 0 arm-str-off emit32          \ STR X19, [X9] (store value)
+  9 9 8 arm-add-imm emit32           \ ADD X9, X9, #8 (here += 8)
+  9 20 0 arm-str-off emit32          \ STR X9, [X20] (store new here)
+  emit-drop ;                        \ drop value from stack
+
+: emit-c-comma ( -- )  \ ( c -- ) store byte at here, advance by 1
+  9 20 0 arm-ldr-off emit32          \ LDR X9, [X20] (load here)
+  19 9 0 arm-strb-off emit32         \ STRB W19, [X9] (store byte)
+  9 9 1 arm-add-imm emit32           \ ADD X9, X9, #1 (here += 1)
+  9 20 0 arm-str-off emit32          \ STR X9, [X20] (store new here)
+  emit-drop ;                        \ drop value from stack
+
+\ ============================================================
 \ I/O OPERATIONS (macOS ARM64 syscalls)
 \ ============================================================
 
@@ -199,3 +241,48 @@
   emit-drop                          \ pop addr
   16 4 0 arm-movz emit32             \ MOV X16, #4 (write syscall)
   $80 arm-svc emit32 ;               \ SVC #0x80
+
+\ ============================================================
+\ FILE OPERATIONS (macOS ARM64 syscalls)
+\ ============================================================
+\ Syscall numbers: open=5, close=6, read=3, write=4
+\ Return: X0 = result (negative on error)
+
+\ File path buffer offset and slurp buffer offset
+\ Path buffer: X20 + 3072, 256 bytes
+\ Slurp buffer: X20 + 3328, 256KB (for reading source files)
+3072 constant PATH-BUF-OFFSET
+3328 constant SLURP-BUF-OFFSET
+262144 constant SLURP-BUF-SIZE
+
+: emit-close-file ( -- )  \ ( fileid -- ior )
+  \ close(fd) -> 0 on success, negative on error
+  0 19 arm-mov-reg emit32            \ MOV X0, X19 (fd)
+  16 6 0 arm-movz emit32             \ MOV X16, #6 (close syscall)
+  $80 arm-svc emit32                 \ SVC #0x80
+  19 0 arm-mov-reg emit32 ;          \ MOV X19, X0 (return syscall result)
+
+: emit-write-file ( -- )  \ ( addr u fileid -- ior )
+  \ write(fd, buf, count) -> bytes written or negative error
+  0 19 arm-mov-reg emit32            \ MOV X0, X19 (fd)
+  emit-drop                          \ TOS = u
+  2 19 arm-mov-reg emit32            \ MOV X2, X19 (count)
+  emit-drop                          \ TOS = addr
+  1 19 arm-mov-reg emit32            \ MOV X1, X19 (buf)
+  16 4 0 arm-movz emit32             \ MOV X16, #4 (write syscall)
+  $80 arm-svc emit32                 \ SVC #0x80
+  19 0 arm-mov-reg emit32 ;          \ MOV X19, X0 (return bytes written or error)
+
+: emit-read-file ( -- )  \ ( addr u fileid -- u2 ior )
+  \ read(fd, buf, count) -> bytes read or negative error
+  0 19 arm-mov-reg emit32            \ MOV X0, X19 (fd)
+  emit-drop                          \ TOS = u
+  2 19 arm-mov-reg emit32            \ MOV X2, X19 (count)
+  emit-drop                          \ TOS = addr
+  1 19 arm-mov-reg emit32            \ MOV X1, X19 (buf)
+  16 3 0 arm-movz emit32             \ MOV X16, #3 (read syscall)
+  $80 arm-svc emit32                 \ SVC #0x80
+  \ Return (u2 ior) where u2=bytes, ior=0 always (check u2<0 for error)
+  push-tos                           \ make room for u2
+  0 22 0 arm-str-off emit32          \ [X22] = X0 (u2)
+  19 0 0 arm-movz emit32 ;           \ X19 = 0 (ior)

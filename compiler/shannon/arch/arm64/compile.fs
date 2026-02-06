@@ -253,7 +253,7 @@ variable const-count  0 const-count !
 24 constant VAR-ENTRY-SIZE
 create var-buf 128 VAR-ENTRY-SIZE * allot
 variable var-count  0 var-count !
-variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligned)
+variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offset 0)
 
 : var-entry ( n -- addr ) VAR-ENTRY-SIZE * var-buf + ;
 
@@ -297,6 +297,8 @@ variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligne
   2dup s" rshift" str= if 2drop emit-rshift true exit then
   2dup s" 1+" str= if 2drop emit-1+ true exit then
   2dup s" 1-" str= if 2drop emit-1- true exit then
+  2dup s" cells" str= if 2drop emit-cells true exit then
+  2dup s" cell+" str= if 2drop emit-cell+ true exit then
   2drop false ;
 
 : try-stack ( addr u -- handled? )
@@ -322,6 +324,13 @@ variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligne
   2dup s" c!" str= if 2drop emit-c! true exit then
   2dup s" +!" str= if 2drop emit-+! true exit then
   2dup s" sp@" str= if 2drop emit-sp@ true exit then
+  2dup s" here" str= if 2drop emit-here true exit then
+  2dup s" allot" str= if 2drop emit-allot true exit then
+  2dup s" ," str= if 2drop emit-comma true exit then
+  2dup s" c," str= if 2drop emit-c-comma true exit then
+  2dup s" close-file" str= if 2drop emit-close-file true exit then
+  2dup s" write-file" str= if 2drop emit-write-file true exit then
+  2dup s" read-file" str= if 2drop emit-read-file true exit then
   2drop false ;
 
 : try-compare ( addr u -- handled? )
@@ -475,7 +484,7 @@ variable str-len                       \ length of parsed string
   get-token                    \ get word name
   2dup s" main" str= if
     \ Main word - record entry point for Mach-O, emit prologue
-    2drop code-here main-entry ! gen-prologue
+    2drop code-here main-entry ! var-next @ gen-prologue
     begin
       get-token
       dup 0= if 2drop ." Unexpected end of input" cr 1 throw then

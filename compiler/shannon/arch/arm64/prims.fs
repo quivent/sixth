@@ -111,3 +111,16 @@
   19 0 arm-cmp-imm emit32            \ CMP X19, #0
   19 12 arm-cset emit32              \ CSET X19, GT
   19 19 arm-neg emit32 ;             \ NEG X19, X19
+
+\ ============================================================
+\ CELL OPERATIONS
+\ ============================================================
+
+: emit-cells ( -- )  \ ( n -- n*8 )
+  \ LSL X19, X19, #3 (shift left by 3 = multiply by 8)
+  \ UBFM Xd, Xn, #(64-shift), #(63-shift) = LSL Xd, Xn, #shift
+  \ LSL X19, X19, #3 = UBFM X19, X19, #61, #60
+  $D37DF273 emit32 ;
+
+: emit-cell+ ( -- )  \ ( addr -- addr+8 )
+  19 19 8 arm-add-imm emit32 ;       \ ADD X19, X19, #8
