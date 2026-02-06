@@ -6517,8 +6517,11 @@ function tabBadge(stats) {
 }
 
 function renderTabs() {
+  console.log('[Tests] renderTabs() starting, categories:', TEST_CATEGORIES?.length);
   const container = document.getElementById('ts-tabs');
-  if (TEST_CATEGORIES.length === 0) {
+  console.log('[Tests] ts-tabs container:', !!container);
+  if (!TEST_CATEGORIES || TEST_CATEGORIES.length === 0) {
+    console.log('[Tests] No categories, showing empty message');
     container.innerHTML = '<div style="color:var(--ts-text-dim); padding:10px;">No tests found</div>';
     return;
   }
@@ -6738,9 +6741,19 @@ async function runSingleTest(name) {
 }
 
 function render() {
-  renderTabs();
-  renderCategories();
-  updateSummary();
+  console.log('[Tests] render() called, TEST_CATEGORIES:', TEST_CATEGORIES?.length);
+  try {
+    renderTabs();
+    console.log('[Tests] renderTabs() complete');
+  } catch (e) { console.error('[Tests] renderTabs error:', e); }
+  try {
+    renderCategories();
+    console.log('[Tests] renderCategories() complete');
+  } catch (e) { console.error('[Tests] renderCategories error:', e); }
+  try {
+    updateSummary();
+    console.log('[Tests] updateSummary() complete');
+  } catch (e) { console.error('[Tests] updateSummary error:', e); }
 }
 
 async function loadTests() {
