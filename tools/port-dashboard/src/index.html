@@ -338,6 +338,25 @@ body {
     }
   }
   loadWordData();
+
+  // Load test summary
+  async function loadTestSummary() {
+    if (!window.__TAURI__) return;
+    try {
+      const categories = await window.__TAURI__.core.invoke('scan_all_tests');
+      let total = 0, pass = 0;
+      categories.forEach(c => {
+        total += c.total;
+        pass += c.pass;
+      });
+      document.getElementById('pm-tests-pass').textContent = pass;
+      document.getElementById('pm-tests-sub').textContent = `of ${total} tests`;
+    } catch (e) {
+      console.error('Failed to load tests:', e);
+      document.getElementById('pm-tests-sub').textContent = 'Error';
+    }
+  }
+  loadTestSummary();
   </script>
 </div>
 <div id="hw-view" class="panel">
