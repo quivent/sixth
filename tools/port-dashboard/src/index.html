@@ -777,17 +777,23 @@ console.log('[Utils] Utility functions loaded');
     'cells', 'cell+', 'chars', 'char+',
   ];
 
+  let prLoading = false;
+
   async function loadProgressData() {
+    if (prLoading) return;
+    prLoading = true;
+
     const timestamp = document.getElementById('pr-timestamp');
-    timestamp.textContent = 'Last updated: ' + new Date().toLocaleString();
+    timestamp.textContent = 'Loading...';
 
     if (!window.__TAURI__) {
       document.querySelector('.pr-container').innerHTML = '<div style="padding:40px; color:#ff9800;">Progress Report requires the Tauri desktop app</div>';
+      prLoading = false;
       return;
     }
 
     try {
-      // Fetch word data
+      // Fetch word data (fast)
       const words = await window.__TAURI__.core.invoke('get_word_data');
       const done = words.filter(w => w.status === 'done').length;
       const pending = words.filter(w => w.status === 'pending').length;
@@ -796,35 +802,23 @@ console.log('[Utils] Utility functions loaded');
       const total = words.length;
       const tested = words.filter(w => w.has_test).length;
 
-      // Fetch phases
+      // Fetch phases (fast)
       const phases = await window.__TAURI__.core.invoke('get_phases');
       const phasesDone = phases.filter(p => p.status === 'Done').length;
       const phasesTotal = phases.length;
 
-      // Fetch test results (scan without running)
-      let testPass = 0, testWrong = 0, testCfail = 0, testRfail = 0, testTotal = 0;
-      try {
-        const cats = await window.__TAURI__.core.invoke('scan_all_tests');
-        cats.forEach(c => {
-          testPass += c.pass;
-          testWrong += c.wrong;
-          testCfail += c.cfail;
-          testRfail += c.rfail;
-          testTotal += c.total;
-        });
-      } catch (e) { console.log('[Progress] Could not load test data'); }
+      // Update UI immediately with word/phase data
+      timestamp.textContent = 'Last updated: ' + new Date().toLocaleString();
 
-      // Calculate self-hosting percentage
-      // Weight: 40% words done, 30% tests passing, 20% phases, 10% capabilities
+      // Calculate self-hosting percentage (without test data for now)
       const wordsPct = total > 0 ? (done / (total - eliminated)) * 100 : 0;
-      const testsPct = testTotal > 0 ? (testPass / testTotal) * 100 : 0;
       const phasesPct = phasesTotal > 0 ? (phasesDone / phasesTotal) * 100 : 0;
-      const selfHostPct = Math.round(wordsPct * 0.4 + testsPct * 0.3 + phasesPct * 0.2 + 10); // +10 for base capabilities
+      const selfHostPct = Math.round(wordsPct * 0.5 + phasesPct * 0.3 + 10);
 
       // Update self-hosting meter
       document.getElementById('pr-self-host-pct').textContent = selfHostPct + '%';
       document.getElementById('pr-self-host-bar').style.width = selfHostPct + '%';
-      document.getElementById('pr-self-host-label').textContent = `${done} words ported, ${testPass} tests passing, ${phasesDone} phases complete`;
+      document.getElementById('pr-self-host-label').textContent = `${done} words ported, ${phasesDone} phases complete`;
 
       // Update summary cards
       document.getElementById('pr-words-done').textContent = done;
@@ -835,9 +829,10 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-tested-sub').textContent = `${Math.round(tested / total * 100)}% have tests`;
       document.getElementById('pr-tested-bar').style.width = (tested / total * 100) + '%';
 
-      document.getElementById('pr-tests-pass').textContent = testPass;
-      document.getElementById('pr-tests-sub').textContent = `of ${testTotal} tests`;
-      document.getElementById('pr-tests-bar').style.width = testTotal > 0 ? (testPass / testTotal * 100) + '%' : '0%';
+      // Tests - show "run tests" message instead of blocking
+      document.getElementById('pr-tests-pass').textContent = '--';
+      document.getElementById('pr-tests-sub').textContent = 'use Tests tab to run';
+      document.getElementById('pr-tests-bar').style.width = '0%';
 
       document.getElementById('pr-phases-done').textContent = phasesDone;
       document.getElementById('pr-phases-sub').textContent = `of ${phasesTotal} phases`;
@@ -850,11 +845,11 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-stat-elim').textContent = eliminated;
       document.getElementById('pr-stat-total').textContent = total;
 
-      document.getElementById('pr-test-pass').textContent = testPass;
-      document.getElementById('pr-test-wrong').textContent = testWrong;
-      document.getElementById('pr-test-cfail').textContent = testCfail;
-      document.getElementById('pr-test-rfail').textContent = testRfail;
-      document.getElementById('pr-test-total').textContent = testTotal;
+      document.getElementById('pr-test-pass').textContent = '--';
+      document.getElementById('pr-test-wrong').textContent = '--';
+      document.getElementById('pr-test-cfail').textContent = '--';
+      document.getElementById('pr-test-rfail').textContent = '--';
+      document.getElementById('pr-test-total').textContent = '~1693';
 
       // Check capabilities
       const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.name.toLowerCase()));
@@ -880,7 +875,9 @@ console.log('[Utils] Utility functions loaded');
 
     } catch (err) {
       console.error('[Progress] Error loading data:', err);
+      timestamp.textContent = 'Error loading data';
     }
+    prLoading = false;
   }
 
   // Load on panel activation
