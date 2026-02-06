@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::models::{FileInfo, TestCategoryGroup, TestRun, TestSummary, Word, WordStatus};
+use crate::models::{FileInfo, TestCategoryGroup, TestResult, TestRun, TestSummary, Word, WordStatus};
 use crate::parser;
 use crate::runner;
 use crate::state::AppState;
@@ -285,6 +285,12 @@ pub fn scan_all_tests(state: State<AppState>) -> Vec<TestCategoryGroup> {
 #[tauri::command]
 pub fn run_all_tests(state: State<AppState>) -> Result<Vec<TestCategoryGroup>, String> {
     runner::run_all_tests_grouped(state.project_root())
+}
+
+/// Run a single test by name and return the result.
+#[tauri::command]
+pub fn run_single_test(name: String, state: State<AppState>) -> Result<TestResult, String> {
+    runner::run_single_test(state.project_root(), &name)
 }
 
 /// Read a test file from compiler/tests/ directory.

@@ -67,6 +67,7 @@ fn main() {
             commands::get_file_inventory,
             commands::scan_all_tests,
             commands::run_all_tests,
+            commands::run_single_test,
             commands::read_test_file,
             commands::run_interactive_test,
             commands::get_arm64_status,

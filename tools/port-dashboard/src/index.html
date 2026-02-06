@@ -7176,6 +7176,22 @@ LDR   X19, [X9]</pre>
   }
   .ts-toolbar-btn:hover { color: var(--ts-text); background: var(--ts-bg-hover); }
 
+  /* ── Run Single Test Button ── */
+  .ts-run-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 3px;
+    border: 1px solid #4a9;
+    background: rgba(68, 170, 153, 0.15);
+    color: #4a9;
+    cursor: pointer;
+    font-family: var(--ts-font);
+    transition: all 0.15s ease;
+  }
+  .ts-run-btn:hover { background: rgba(68, 170, 153, 0.3); color: #5cb; }
+  .ts-run-btn.running { opacity: 0.5; cursor: wait; }
+
   /* ── Verify Note ── */
   .ts-verify {
     font-size: 10px;
@@ -7362,12 +7378,14 @@ function renderTest(t) {
       <span class="ts-test-name" style="flex:1; font-family:var(--ts-font);">${esc(t.name)}</span>
       <span class="ts-test-status" style="font-size:9px; color:var(--ts-text-dim);">${t.status}</span>
       ${t.compile_ms > 0 ? `<span style="font-size:9px; color:var(--ts-text-dim);">${t.compile_ms}ms</span>` : ''}
+      <button class="ts-run-btn" onclick="event.stopPropagation(); runSingleTest('${esc(t.name)}')" title="Run this test">▶</button>
       <span class="ts-test-chevron">&#9654;</span>
     </div>
     <div class="ts-test-body">
       <div class="ts-test-section">
         <div class="ts-test-section-label">Test File</div>
         <div style="font-family:var(--ts-font); color:var(--ts-accent);">compiler/tests/${esc(t.name)}.fs</div>
+        <button class="ts-toolbar-btn" style="margin-top:8px;" onclick="runSingleTest('${esc(t.name)}')">▶ Run Test</button>
         <button class="ts-toolbar-btn" style="margin-top:8px;" onclick="viewTestFile('${esc(t.name)}')">View Source</button>
       </div>
     </div>
@@ -7431,6 +7449,70 @@ async function viewTestFile(name) {
     document.body.appendChild(modal);
   } catch (err) {
     alert('Error loading test file: ' + err);
+  }
+}
+
+async function runSingleTest(name) {
+  if (!window.__TAURI__) {
+    alert('Running tests requires the Tauri desktop app.');
+    return;
+  }
+
+  // Find all run buttons for this test and mark as running
+  const testEl = document.querySelector(`.ts-test[data-test-name="${name}"]`);
+  const runBtns = testEl ? testEl.querySelectorAll('.ts-run-btn, .ts-toolbar-btn') : [];
+  runBtns.forEach(btn => {
+    if (btn.textContent.includes('▶')) {
+      btn.classList.add('running');
+      btn.disabled = true;
+    }
+  });
+
+  try {
+    console.log('[test] Running single test:', name);
+    const result = await window.__TAURI__.core.invoke('run_single_test', { name });
+    console.log('[test] Result:', result);
+
+    // Update the test status in UI
+    if (testEl) {
+      const statusEl = testEl.querySelector('.ts-test-status');
+      const iconEl = testEl.querySelector('.ts-test-head svg, .ts-test-head span:first-child');
+
+      if (statusEl) statusEl.textContent = result.status;
+
+      // Update icon based on status
+      const statusIcon = {
+        'Pass': '✓',
+        'Wrong': '✗',
+        'Cfail': '⚠',
+        'Rfail': '✗',
+      }[result.status] || '?';
+
+      const statusColor = {
+        'Pass': '#4a9',
+        'Wrong': '#e55',
+        'Cfail': '#fa0',
+        'Rfail': '#e55',
+      }[result.status] || '#888';
+
+      // Flash the result
+      testEl.style.transition = 'background 0.3s';
+      testEl.style.background = result.status === 'Pass' ? 'rgba(68,170,153,0.2)' : 'rgba(238,85,85,0.2)';
+      setTimeout(() => { testEl.style.background = ''; }, 1000);
+    }
+
+    // Show brief notification
+    const msg = result.status === 'Pass' ? `✓ ${name} passed` : `✗ ${name}: ${result.status}`;
+    console.log('[test]', msg);
+
+  } catch (err) {
+    console.error('[test] Error running test:', err);
+    alert('Error running test: ' + err);
+  } finally {
+    runBtns.forEach(btn => {
+      btn.classList.remove('running');
+      btn.disabled = false;
+    });
   }
 }
 

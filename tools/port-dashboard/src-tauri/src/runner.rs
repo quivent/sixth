@@ -223,6 +223,64 @@ pub fn scan_all_tests(project_root: &Path) -> Vec<TestCategoryGroup> {
     groups
 }
 
+/// Run a single test by name pattern and return the result.
+/// The pattern is passed to the test script (e.g., "1000-fold-add" or "adversarial/0001*").
+pub fn run_single_test(project_root: &Path, pattern: &str) -> Result<TestResult, String> {
+    let test_script = project_root.join("compiler/tests/test");
+    if !test_script.exists() {
+        return Err(format!("Test script not found: {}", test_script.display()));
+    }
+
+    let output = Command::new(&test_script)
+        .arg(pattern)
+        .current_dir(project_root)
+        .env("VERBOSE", "1")
+        .output()
+        .map_err(|e| format!("Failed to run test: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{}\n{}", stdout, stderr);
+
+    // Parse the single test result
+    // Format: "name:STATUS:compile_ms:run_ms" or just PASS/FAIL in output
+    let status = if combined.contains("PASS:") || combined.contains(": PASS") {
+        TestStatus::Pass
+    } else if combined.contains("WRONG:") || combined.contains(": WRONG") {
+        TestStatus::Wrong
+    } else if combined.contains("CFAIL:") || combined.contains(": CFAIL") {
+        TestStatus::Cfail
+    } else if combined.contains("RFAIL:") || combined.contains(": RFAIL") {
+        TestStatus::Rfail
+    } else if output.status.success() {
+        TestStatus::Pass
+    } else {
+        TestStatus::Rfail
+    };
+
+    // Extract timing from verbose output if available
+    let mut compile_ms = 0;
+    let mut run_ms = 0;
+    for line in combined.lines() {
+        if line.contains(':') {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 4 {
+                compile_ms = parts[2].trim().parse().unwrap_or(0);
+                run_ms = parts[3].trim().parse().unwrap_or(0);
+                break;
+            }
+        }
+    }
+
+    Ok(TestResult {
+        name: pattern.to_string(),
+        status,
+        compile_ms,
+        run_ms,
+        category: TestCategory::from_test_name(pattern),
+    })
+}
+
 /// Run all tests and return results grouped by category.
 pub fn run_all_tests_grouped(project_root: &Path) -> Result<Vec<TestCategoryGroup>, String> {
     let test_script = project_root.join("compiler/tests/test");
