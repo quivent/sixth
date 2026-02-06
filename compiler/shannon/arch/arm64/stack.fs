@@ -312,10 +312,31 @@
   16 5 0 arm-movz emit32              \ MOV X16, #5 (open)
   $80 arm-svc emit32                  \ SVC #0x80
 
-  \ Return (fileid ior): fileid in X0, ior=0 (caller checks fileid<0)
+  \ macOS ARM64: carry flag set on error, X0 = errno (positive)
+  \ B.CS error (branch if carry set) - jump over success path
+  code-pos @                          \ save B.CS position for patching
+  2 0 arm-bcond emit32                \ placeholder B.CS (cond=2=CS)
+
+  \ Success path: return (fd 0)
   push-tos                            \ make room for fileid
-  0 22 0 arm-str-off emit32           \ [X22] = X0 (fileid)
-  19 0 0 arm-movz emit32 ;            \ X19 = 0 (ior)
+  0 22 0 arm-str-off emit32           \ [X22] = X0 (fd)
+  19 0 0 arm-movz emit32              \ X19 = 0 (ior = success)
+  code-pos @                          \ save B position for skip
+  0 arm-b emit32                      \ placeholder B (skip error path)
+
+  \ Error path: negate errno -> return (-errno ior)
+  swap code-pos @ over - 4 /          \ compute B.CS offset
+  2 swap arm-bcond swap patch32       \ patch B.CS
+
+  push-tos                            \ make room for error result
+  9 0 arm-mov-reg emit32              \ MOV X9, X0 (errno)
+  19 31 9 arm-sub-reg emit32          \ SUB X19, XZR, X9 (negate: -errno)
+  19 22 0 arm-str-off emit32          \ [X22] = -errno (fileid)
+  19 0 0 arm-movz emit32              \ X19 = 0 (ior, conventionally 0)
+
+  \ Patch the success path's unconditional branch to skip error
+  code-pos @ over - 4 /               \ compute B offset
+  arm-b swap patch32 ;                \ patch B
 
 : emit-close-file ( -- )  \ ( fileid -- ior )
   \ close(fd) -> 0 on success, negative on error
