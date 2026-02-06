@@ -501,10 +501,11 @@ variable str-len                       \ length of parsed string
   2dup s" main" str= if
     \ Main word - record entry point for Mach-O, emit prologue
     2drop code-here main-entry ! var-next @ gen-prologue
+    true in-main? !            \ EXIT in main should exit program
     begin
       get-token
       dup 0= if 2drop ." Unexpected end of input" cr 1 throw then
-      2dup s" ;" str= if 2drop gen-epilogue exit then
+      2dup s" ;" str= if 2drop 0 in-main? ! gen-epilogue exit then
       compile-token
     again
   else
@@ -512,6 +513,7 @@ variable str-len                       \ length of parsed string
     2dup code-here dict-add    \ add to dictionary (keep name for resolve)
     code-here resolve-pending  \ resolve any forward refs to this word
     gen-word-prologue          \ save LR to return stack
+    0 in-main? !               \ EXIT in word should return
     begin
       get-token
       dup 0= if 2drop ." Unexpected end of input" cr 1 throw then

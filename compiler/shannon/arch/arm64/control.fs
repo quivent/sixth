@@ -2,6 +2,14 @@
 \ Requires: asm.fs, stack.fs
 
 \ ============================================================
+\ COMPILATION CONTEXT
+\ ============================================================
+
+\ Track if we're compiling main (where EXIT = exit program)
+\ vs regular word (where EXIT = return from word)
+variable in-main?  0 in-main? !
+
+\ ============================================================
 \ CONTROL FLOW STACK
 \ ============================================================
 
@@ -25,22 +33,6 @@ variable cf-sp  0 cf-sp !
 
 \ code-here returns offset from code-buf start
 : code-here ( -- addr ) code-pos @ ;
-
-\ ============================================================
-\ 32-BIT MEMORY ACCESS (ARM64 instructions are 32-bit)
-\ ============================================================
-
-\ l@ - fetch 32-bit little-endian value
-: l@ ( addr -- u32 )
-  dup c@ swap 1+ dup c@ swap 1+ dup c@ swap 1+ c@
-  24 lshift swap 16 lshift or swap 8 lshift or or ;
-
-\ l! - store 32-bit little-endian value
-: l! ( u32 addr -- )
-  over $FF and over c!
-  1+ over 8 rshift $FF and over c!
-  1+ over 16 rshift $FF and over c!
-  1+ swap 24 rshift $FF and swap c! ;
 
 \ ============================================================
 \ FORWARD REFERENCE PATCHING
@@ -163,8 +155,12 @@ variable cf-sp  0 cf-sp !
   $D65F03C0 emit32 ;
 
 : emit-exit ( -- )
-  \ Early return from word - same as gen-ret
-  gen-ret ;
+  \ Early return: in main, exit program; in word, return to caller
+  in-main? @ if
+    gen-epilogue   \ main: exit with TOS via SVC
+  else
+    gen-ret        \ word: pop LR and return
+  then ;
 
 \ ============================================================
 \ DO / LOOP CONTROL FLOW

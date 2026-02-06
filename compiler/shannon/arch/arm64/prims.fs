@@ -141,8 +141,9 @@
 
 : emit-move ( -- )  \ ( src dst u -- ) copy u bytes from src to dst
   \ Stack: TOS=u, NOS=dst, 3rd=src
-  \ Registers: X19=u, [X22]=dst, [X22+8]=src
-  \ Handles overlapping by comparing addresses and choosing direction
+  \ Handles overlapping by choosing direction:
+  \   if dst > src: copy backward (from end)
+  \   else: copy forward (from start)
 
   \ Save u to X12
   12 19 arm-mov-reg emit32            \ MOV X12, X19 (count)
@@ -157,30 +158,71 @@
   emit-drop                           \ pop src, stack now empty of args
 
   \ CBZ X12, done (skip if count=0)
-  code-pos @                          \ save CBZ position
+  code-pos @                          \ save CBZ-to-done position
   12 0 arm-cbz emit32                 \ placeholder
 
-  \ Check for overlap: if dst > src AND dst < src+count, copy backwards
-  \ For simplicity, always copy forwards (standard move behavior)
-  \ cmove handles non-overlapping, move should handle overlap but we'll
-  \ just do forwards for now
+  \ Compare dst vs src to decide direction
+  \ CMP X11, X10 (dst - src)
+  11 10 arm-cmp-reg emit32
 
-  \ Forward copy loop:
-  \ loop:
+  \ B.LS forward (if dst <= src, use forward copy)
+  code-pos @                          \ save B.LS position
+  0 arm-b emit32                      \ placeholder B (will patch to forward)
+  \ Patch to B.LS (condition code 9 = LS = unsigned lower or same)
+  code-buf code-pos @ + 4 - dup
+  l@ $FF00000F and $54000009 or swap l!
+
+  \ --- BACKWARD COPY (dst > src) ---
+  \ Point to last bytes: src += count-1, dst += count-1
+  10 10 12 arm-add-reg emit32         \ ADD X10, X10, X12 (src + count)
+  10 10 1 arm-sub-imm emit32          \ SUB X10, X10, #1 (src + count - 1)
+  11 11 12 arm-add-reg emit32         \ ADD X11, X11, X12 (dst + count)
+  11 11 1 arm-sub-imm emit32          \ SUB X11, X11, #1 (dst + count - 1)
+
+  \ back_loop:
   code-pos @                          \ save loop address
+
+  9 10 -1 arm-ldrb-post emit32        \ LDRB W9, [X10], #-1 (load byte, src--)
+  9 11 -1 arm-strb-post emit32        \ STRB W9, [X11], #-1 (store byte, dst--)
+  12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1 (count--)
+
+  \ CBNZ X12, back_loop
+  dup code-pos @ - 4 /                \ offset = (loop - here) / 4
+  12 swap arm-cbnz emit32
+  drop                                \ drop back loop addr
+
+  \ B done (skip forward copy)
+  code-pos @                          \ save B-to-done position
+  0 arm-b emit32                      \ placeholder
+
+  \ Patch B.LS to jump here (forward copy)
+  swap                                \ ( cbz-pos b-done-pos b-ls-pos )
+  code-pos @ over - 4 /               \ offset to here
+  $7FFFF and 5 lshift                 \ encode imm19
+  swap code-buf + dup l@ $FF00001F and rot or swap l!
+
+  \ --- FORWARD COPY ---
+  \ fwd_loop:
+  code-pos @                          \ save fwd loop address
 
   9 10 1 arm-ldrb-post emit32         \ LDRB W9, [X10], #1  (load byte, src++)
   9 11 1 arm-strb-post emit32         \ STRB W9, [X11], #1  (store byte, dst++)
   12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1 (count--)
 
-  \ CBNZ X12, loop
-  over code-pos @ - 4 /               \ offset = (loop - here) / 4
+  \ CBNZ X12, fwd_loop
+  dup code-pos @ - 4 /                \ offset = (loop - here) / 4
   12 swap arm-cbnz emit32
-  drop                                \ drop loop addr
+  drop                                \ drop fwd loop addr
 
-  \ done: patch CBZ
+  \ done: patch both jumps (CBZ and B-to-done)
+  \ Patch CBZ to here
+  swap                                \ ( b-done-pos cbz-pos )
   code-pos @ over - 4 /               \ offset from CBZ to done
-  12 swap arm-cbz swap patch32 ;      \ patch CBZ
+  12 swap arm-cbz swap patch32
+
+  \ Patch B to here
+  code-pos @ over - 4 /               \ offset from B to done
+  swap code-buf + dup l@ $FC000000 and rot $3FFFFFF and or swap l! ;      \ patch CBZ
 
 : emit-fill ( -- )  \ ( addr u c -- ) fill u bytes at addr with c
   \ Stack: TOS=c, NOS=u, 3rd=addr

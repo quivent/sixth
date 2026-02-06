@@ -19,6 +19,18 @@ variable code-pos   0 code-pos !
 : emit32 ( u -- )
   dup >code 8 rshift dup >code 8 rshift dup >code 8 rshift >code ;
 
+\ l@ - fetch 32-bit little-endian value (for instruction patching)
+: l@ ( addr -- u32 )
+  dup c@ swap 1+ dup c@ swap 1+ dup c@ swap 1+ c@
+  24 lshift swap 16 lshift or swap 8 lshift or or ;
+
+\ l! - store 32-bit little-endian value (for instruction patching)
+: l! ( u32 addr -- )
+  over $FF and over c!
+  1+ over 8 rshift $FF and over c!
+  1+ over 16 rshift $FF and over c!
+  1+ swap 24 rshift $FF and swap c! ;
+
 \ ============================================================
 \ IMMEDIATE MOVE INSTRUCTIONS
 \ ============================================================
