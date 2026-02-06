@@ -6802,7 +6802,18 @@ console.log('[Tests] Found buttons:', { runBtn: !!runBtn, refreshBtn: !!refreshB
 if (runBtn) runBtn.addEventListener('click', runAllTests);
 if (refreshBtn) refreshBtn.addEventListener('click', loadTests);
 console.log('[Tests] Calling loadTests()...');
-loadTests();
+// Wait a moment for Tauri to initialize
+if (window.__TAURI__) {
+  loadTests();
+} else {
+  console.log('[Tests] Tauri not ready, waiting...');
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      console.log('[Tests] Retrying loadTests after delay, __TAURI__:', !!window.__TAURI__);
+      loadTests();
+    }, 500);
+  });
+}
 
 </script>
 </div>
