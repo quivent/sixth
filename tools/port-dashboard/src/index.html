@@ -8971,6 +8971,13 @@ if (window.__TAURI__) {
 .stat-red { color: #f44336; }
 .stat-gray { color: #607d8b; }
 .stat-purple { color: #9c27b0; }
+.tracker-stat-header {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: #7ecfff; font-weight: 600; padding: 0 8px;
+  border-left: 2px solid #333; margin-left: 8px;
+}
+.tracker-stat-header:first-child { border-left: none; margin-left: 0; }
 
 /* Phase gates */
 .phase-gate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
@@ -9144,7 +9151,7 @@ if (window.__TAURI__) {
   // ===== USE WORD_DATA from the existing global (defined later in the HTML) =====
   // We'll initialize after DOMContentLoaded to ensure WORD_DATA is available.
 
-  function initTracker() {
+  async function initTracker() {
     const words = window.WORD_DATA || [];
     if (!words.length) {
       // Retry in 500ms if WORD_DATA isn't loaded yet
@@ -9152,7 +9159,7 @@ if (window.__TAURI__) {
       return;
     }
 
-    // ===== COMPUTE STATS =====
+    // ===== COMPUTE WORD STATS =====
     const total = words.length;
     const done = words.filter(w => w.status === 'done').length;
     const pending = words.filter(w => w.status === 'pending').length;
@@ -9160,18 +9167,30 @@ if (window.__TAURI__) {
     const eliminated = words.filter(w => w.status === 'eliminated').length;
     const pctDone = total > 0 ? Math.round((done / (total - eliminated)) * 100) : 0;
 
+    // ===== FETCH PHASE DATA FROM BACKEND =====
+    let phasesDone = 1, phasesTotal = 11;  // Fallback values
+    if (window.__TAURI__) {
+      try {
+        const phases = await window.__TAURI__.core.invoke('get_phases');
+        phasesDone = phases.filter(p => p.status === 'Done').length;
+        phasesTotal = phases.length;
+      } catch (e) { console.log('[Tracker] Using fallback phase counts'); }
+    }
+
     // ===== SUMMARY STATS =====
     const statsEl = document.getElementById('tracker-stats');
     if (statsEl) {
       statsEl.innerHTML = `
+        <div class="tracker-stat-header">Words</div>
         <div class="tracker-stat"><div class="stat-value stat-green">${done}</div><div class="stat-label">Done</div></div>
         <div class="tracker-stat"><div class="stat-value stat-orange">${pending}</div><div class="stat-label">Pending</div></div>
         <div class="tracker-stat"><div class="stat-value stat-blue">${redesign}</div><div class="stat-label">Redesign</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-red">${eliminated}</div><div class="stat-label">Eliminated</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-gray">${total}</div><div class="stat-label">Total Words</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-red">${eliminated}</div><div class="stat-label">Elim</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-gray">${total}</div><div class="stat-label">Total</div></div>
         <div class="tracker-stat"><div class="stat-value stat-purple">${pctDone}%</div><div class="stat-label">Progress</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-green">1</div><div class="stat-label">Phases Done</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-orange">10</div><div class="stat-label">Phases Total</div></div>
+        <div class="tracker-stat-header">Phases</div>
+        <div class="tracker-stat"><div class="stat-value stat-green">${phasesDone}</div><div class="stat-label">Done</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-orange">${phasesTotal}</div><div class="stat-label">Total</div></div>
       `;
     }
 
