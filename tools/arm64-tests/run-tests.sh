@@ -5,7 +5,7 @@ PASS=0
 FAIL=0
 TOTAL=0
 
-for test in tools/arm64-tests/phase*.fs; do
+for test in tools/arm64-tests/phase*.fs tools/arm64-tests/adv*.fs tools/arm64-tests/audit*.fs tools/arm64-tests/adversarial*.fs; do
     TOTAL=$((TOTAL + 1))
     name=$(basename "$test" .fs)
     
