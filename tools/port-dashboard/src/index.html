@@ -6157,6 +6157,14 @@ LDR   X19, [X9]</pre>
   .ts-tab-badge.ts-some-fail { background: rgba(255,107,107,0.15); color: var(--ts-fail); }
   .ts-tab-badge.ts-none { background: rgba(85,85,102,0.15); color: var(--ts-untested); }
 
+  /* ── Difficulty Colors ── */
+  .ts-tab.ts-diff-easy { border-left: 3px solid #51cf66; }
+  .ts-tab.ts-diff-medium { border-left: 3px solid #7ecfff; }
+  .ts-tab.ts-diff-hard { border-left: 3px solid #ffc107; }
+  .ts-tab.ts-diff-expert { border-left: 3px solid #ff6b6b; }
+  .ts-tab.ts-diff-standard { border-left: 3px solid #b388ff; }
+  .ts-tab.ts-diff-misc { border-left: 3px solid #666; }
+
   /* ── Phase Panel ── */
   .ts-phase {
     display: none;
@@ -6461,6 +6469,16 @@ LDR   X19, [X9]</pre>
   </div>
 </div>
 
+<!-- Difficulty Legend -->
+<div style="display:flex; gap:12px; padding:8px 0; font-size:9px; color:var(--ts-text-dim); align-items:center;">
+  <span style="opacity:0.7;">Difficulty:</span>
+  <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#51cf66; border-radius:1px;"></span> Easy</span>
+  <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#7ecfff; border-radius:1px;"></span> Medium</span>
+  <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#ffc107; border-radius:1px;"></span> Hard</span>
+  <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#ff6b6b; border-radius:1px;"></span> Expert</span>
+  <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#b388ff; border-radius:1px;"></span> ANS Standard</span>
+</div>
+
 <!-- Category Tabs -->
 <div class="ts-tabs" id="ts-tabs">
   <div style="color:var(--ts-text-dim); padding:10px;">Loading tests...</div>
@@ -6483,6 +6501,26 @@ const TEST_STATUS_COLORS = {
   CFAIL: '#ff9800',
   RFAIL: '#ff6b6b',
   UNKNOWN: 'var(--ts-untested)'
+};
+
+// Difficulty groupings for visual coloring
+const CATEGORY_DIFFICULTY = {
+  'Basic': 'easy',
+  'Folding': 'easy',
+  'Fusing': 'medium',
+  'Forward': 'medium',
+  'Control': 'medium',
+  'Variables': 'medium',
+  'Memory': 'hard',
+  'Strings': 'hard',
+  'Double': 'hard',
+  'Algorithms': 'hard',
+  'Strength': 'hard',
+  'Parsing': 'expert',
+  'Stress': 'expert',
+  'Adversarial': 'expert',
+  'Hayes': 'standard',
+  'Other': 'misc'
 };
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -6529,7 +6567,8 @@ function renderTabs() {
   container.innerHTML = TEST_CATEGORIES.map((cat, idx) => {
     const stats = getCategoryStats(cat);
     const active = cat.category === activeCategory ? ' ts-active' : '';
-    return `<button class="ts-tab${active}" data-category="${cat.category}">${esc(cat.display_name)}${tabBadge(stats)}</button>`;
+    const diff = CATEGORY_DIFFICULTY[cat.category] || 'misc';
+    return `<button class="ts-tab ts-diff-${diff}${active}" data-category="${cat.category}">${esc(cat.display_name)}${tabBadge(stats)}</button>`;
   }).join('');
 
   container.querySelectorAll('.ts-tab').forEach(btn => {
