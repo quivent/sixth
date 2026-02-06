@@ -6589,7 +6589,7 @@ function renderTest(t) {
     <div class="ts-test-head">
       ${statusIcon(t.status)}
       <span class="ts-test-name" style="flex:1; font-family:var(--ts-font);">${esc(t.name)}</span>
-      <span class="ts-test-status" style="font-size:9px; color:var(--ts-text-dim);">${t.status}</span>
+      <span class="ts-test-status" style="font-size:9px; color:var(--ts-text-dim);">${t.status === 'UNKNOWN' ? '--' : t.status}</span>
       ${t.compile_ms > 0 ? `<span style="font-size:9px; color:var(--ts-text-dim);">${t.compile_ms}ms</span>` : ''}
       <button class="ts-run-btn" onclick="event.stopPropagation(); runSingleTest('${esc(t.name)}')" title="Run this test">▶</button>
       <span class="ts-test-chevron">&#9654;</span>
