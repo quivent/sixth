@@ -307,6 +307,7 @@ console.log('[Utils] Utility functions loaded');
 
 <div id="tabs">
   <div class="tab active" data-panel="metrics-view">Snapshot</div>
+  <div class="tab" data-panel="progress-view">Progress</div>
   <div class="tab" data-panel="hw-view">Hardware</div>
   <div class="tab" data-panel="code-view">Code Map</div>
   <div class="tab" data-panel="bin-view">Binary Format</div>
@@ -611,6 +612,293 @@ console.log('[Utils] Utility functions loaded');
   loadTestSummary();
   </script>
 </div>
+
+<!-- ============================================================ -->
+<!-- PROGRESS REPORT PANEL -->
+<!-- ============================================================ -->
+<div id="progress-view" class="panel">
+<style>
+.pr-container { font-family: 'SF Mono', monospace; color: #c0c0cc; padding: 24px; max-width: 1200px; }
+.pr-header { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #7ecfff; margin-bottom: 8px; font-weight: 600; }
+.pr-title { font-size: 24px; font-weight: 700; color: #e0e0ee; margin-bottom: 4px; }
+.pr-subtitle { font-size: 12px; color: #666; margin-bottom: 24px; }
+.pr-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+.pr-card { background: rgba(10,10,18,0.95); border: 1px solid #1a1a2a; border-radius: 8px; padding: 20px; }
+.pr-card-header { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; margin-bottom: 8px; }
+.pr-card-value { font-size: 32px; font-weight: 700; }
+.pr-card-sub { font-size: 11px; color: #666; margin-top: 4px; }
+.pr-card-bar { height: 4px; background: #1a1a2a; border-radius: 2px; margin-top: 12px; overflow: hidden; }
+.pr-card-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+/* Self-hosting meter */
+.pr-self-host { margin-bottom: 32px; }
+.pr-meter-track { height: 24px; background: #0d0d14; border-radius: 4px; overflow: hidden; position: relative; }
+.pr-meter-fill { height: 100%; background: linear-gradient(90deg, #51cf66, #7ecfff); border-radius: 4px; transition: width 1s ease; }
+.pr-meter-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.pr-meter-pct { font-size: 48px; font-weight: 700; color: #51cf66; }
+
+/* Capabilities */
+.pr-caps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 32px; }
+.pr-cap { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(10,10,18,0.6); border-radius: 6px; border: 1px solid #1a1a2a; }
+.pr-cap-icon { font-size: 16px; width: 24px; text-align: center; }
+.pr-cap-text { font-size: 12px; color: #888; }
+.pr-cap.done .pr-cap-icon { color: #51cf66; }
+.pr-cap.done .pr-cap-text { color: #c0c0cc; }
+.pr-cap.partial .pr-cap-icon { color: #ffd700; }
+.pr-cap.missing .pr-cap-icon { color: #ff6b6b; }
+
+/* Missing words */
+.pr-missing { background: rgba(255,107,107,0.05); border: 1px solid rgba(255,107,107,0.2); border-radius: 8px; padding: 20px; }
+.pr-missing-header { color: #ff6b6b; margin-bottom: 12px; }
+.pr-missing-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.pr-missing-word { background: rgba(255,107,107,0.1); color: #ff9999; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', monospace; }
+
+/* Two column layout */
+.pr-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+.pr-section { background: rgba(10,10,18,0.6); border: 1px solid #1a1a2a; border-radius: 8px; padding: 20px; }
+.pr-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ecfff; margin-bottom: 16px; font-weight: 600; }
+.pr-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(26,26,42,0.5); }
+.pr-row:last-child { border-bottom: none; }
+.pr-row-label { color: #888; font-size: 12px; }
+.pr-row-value { color: #e0e0ee; font-size: 12px; font-weight: 600; }
+</style>
+
+<div class="pr-container">
+  <div class="pr-header">ARM64 Port Progress Report</div>
+  <div class="pr-title">Shannon Compiler Self-Hosting</div>
+  <div class="pr-subtitle" id="pr-timestamp">Last updated: --</div>
+
+  <!-- Self-hosting progress meter -->
+  <div class="pr-self-host">
+    <div style="display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px;">
+      <div class="pr-meter-pct" id="pr-self-host-pct">--%</div>
+      <div style="color: #666; font-size: 12px;">toward self-hosting on ARM64</div>
+    </div>
+    <div class="pr-meter-track">
+      <div class="pr-meter-fill" id="pr-self-host-bar" style="width: 0%"></div>
+      <div class="pr-meter-label" id="pr-self-host-label">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="pr-grid">
+    <div class="pr-card">
+      <div class="pr-card-header">Words Ported</div>
+      <div class="pr-card-value" style="color:#51cf66" id="pr-words-done">--</div>
+      <div class="pr-card-sub" id="pr-words-sub">of -- total</div>
+      <div class="pr-card-bar"><div class="pr-card-fill" id="pr-words-bar" style="background:#51cf66; width:0%"></div></div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-card-header">Words Tested</div>
+      <div class="pr-card-value" style="color:#7ecfff" id="pr-words-tested">--</div>
+      <div class="pr-card-sub" id="pr-tested-sub">with test coverage</div>
+      <div class="pr-card-bar"><div class="pr-card-fill" id="pr-tested-bar" style="background:#7ecfff; width:0%"></div></div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-card-header">Tests Passing</div>
+      <div class="pr-card-value" style="color:#51cf66" id="pr-tests-pass">--</div>
+      <div class="pr-card-sub" id="pr-tests-sub">of -- tests</div>
+      <div class="pr-card-bar"><div class="pr-card-fill" id="pr-tests-bar" style="background:#51cf66; width:0%"></div></div>
+    </div>
+    <div class="pr-card">
+      <div class="pr-card-header">Phases Complete</div>
+      <div class="pr-card-value" style="color:#b388ff" id="pr-phases-done">--</div>
+      <div class="pr-card-sub" id="pr-phases-sub">of -- phases</div>
+      <div class="pr-card-bar"><div class="pr-card-fill" id="pr-phases-bar" style="background:#b388ff; width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Two column: Word breakdown + Test breakdown -->
+  <div class="pr-two-col">
+    <div class="pr-section">
+      <div class="pr-section-title">Word Status Breakdown</div>
+      <div class="pr-row"><span class="pr-row-label">Done (ported)</span><span class="pr-row-value" style="color:#51cf66" id="pr-stat-done">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Pending (to port)</span><span class="pr-row-value" style="color:#ffd700" id="pr-stat-pending">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Redesign (needs new encoding)</span><span class="pr-row-value" style="color:#ff922b" id="pr-stat-redesign">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Eliminated (ELF-only)</span><span class="pr-row-value" style="color:#ff6b6b" id="pr-stat-elim">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Total words</span><span class="pr-row-value" id="pr-stat-total">--</span></div>
+    </div>
+    <div class="pr-section">
+      <div class="pr-section-title">Test Results</div>
+      <div class="pr-row"><span class="pr-row-label">Passing</span><span class="pr-row-value" style="color:#51cf66" id="pr-test-pass">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Wrong output</span><span class="pr-row-value" style="color:#ff6b6b" id="pr-test-wrong">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Compile fail</span><span class="pr-row-value" style="color:#ff9800" id="pr-test-cfail">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Runtime fail</span><span class="pr-row-value" style="color:#ff6b6b" id="pr-test-rfail">--</span></div>
+      <div class="pr-row"><span class="pr-row-label">Total tests</span><span class="pr-row-value" id="pr-test-total">--</span></div>
+    </div>
+  </div>
+
+  <!-- Capabilities checklist -->
+  <div class="pr-header" style="margin-bottom: 12px;">Compiler Capabilities</div>
+  <div class="pr-caps-grid" id="pr-capabilities">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Missing critical words -->
+  <div class="pr-missing" id="pr-missing-section">
+    <div class="pr-header pr-missing-header">Missing Critical Words</div>
+    <div class="pr-missing-list" id="pr-missing-list">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // Capabilities definition
+  const CAPABILITIES = [
+    { id: 'arithmetic', name: 'Arithmetic (+, -, *, /)', words: ['+', '-', '*', '/'] },
+    { id: 'comparison', name: 'Comparison (<, >, =)', words: ['<', '>', '=', '0=', '0<'] },
+    { id: 'stack', name: 'Stack ops (dup, drop, swap)', words: ['dup', 'drop', 'swap', 'over', 'rot'] },
+    { id: 'memory', name: 'Memory (@, !, c@, c!)', words: ['@', '!', 'c@', 'c!'] },
+    { id: 'control', name: 'Control flow (if/then/else)', words: ['if', 'then', 'else'] },
+    { id: 'loops', name: 'Loops (do/loop, begin/until)', words: ['do', 'loop', 'begin', 'until', 'while', 'repeat'] },
+    { id: 'io', name: 'I/O (emit, type, key)', words: ['emit', 'type', 'key'] },
+    { id: 'strings', name: 'Strings (s", .")', words: ['s"', '."', 'count'] },
+    { id: 'definitions', name: 'Definitions (:, ;, create)', words: [':', ';', 'create', 'variable', 'constant'] },
+    { id: 'rstack', name: 'Return stack (>r, r>, r@)', words: ['>r', 'r>', 'r@'] },
+    { id: 'bitwise', name: 'Bitwise (and, or, xor)', words: ['and', 'or', 'xor', 'invert'] },
+    { id: 'fileio', name: 'File I/O (open, close, read)', words: ['open-file', 'close-file', 'read-file', 'write-file'] },
+  ];
+
+  // Critical words for self-hosting
+  const CRITICAL_WORDS = [
+    ':', ';', 'create', 'variable', 'constant', 'allot',
+    '@', '!', 'c@', 'c!', '+', '-', '*', '/',
+    'dup', 'drop', 'swap', 'over', 'rot', '>r', 'r>', 'r@',
+    'if', 'then', 'else', 'begin', 'until', 'while', 'repeat',
+    'do', 'loop', '+loop', 'i', 'j', 'leave',
+    'emit', 'type', 'key', 's"', '."',
+    'here', ',', 'c,', 'align', 'aligned',
+    'and', 'or', 'xor', 'invert', 'lshift', 'rshift',
+    '<', '>', '=', '0=', '0<', 'u<',
+    'cells', 'cell+', 'chars', 'char+',
+  ];
+
+  async function loadProgressData() {
+    const timestamp = document.getElementById('pr-timestamp');
+    timestamp.textContent = 'Last updated: ' + new Date().toLocaleString();
+
+    if (!window.__TAURI__) {
+      document.querySelector('.pr-container').innerHTML = '<div style="padding:40px; color:#ff9800;">Progress Report requires the Tauri desktop app</div>';
+      return;
+    }
+
+    try {
+      // Fetch word data
+      const words = await window.__TAURI__.core.invoke('get_word_data');
+      const done = words.filter(w => w.status === 'done').length;
+      const pending = words.filter(w => w.status === 'pending').length;
+      const redesign = words.filter(w => w.status === 'redesign').length;
+      const eliminated = words.filter(w => w.status === 'eliminated').length;
+      const total = words.length;
+      const tested = words.filter(w => w.has_test).length;
+
+      // Fetch phases
+      const phases = await window.__TAURI__.core.invoke('get_phases');
+      const phasesDone = phases.filter(p => p.status === 'Done').length;
+      const phasesTotal = phases.length;
+
+      // Fetch test results (scan without running)
+      let testPass = 0, testWrong = 0, testCfail = 0, testRfail = 0, testTotal = 0;
+      try {
+        const cats = await window.__TAURI__.core.invoke('scan_all_tests');
+        cats.forEach(c => {
+          testPass += c.pass;
+          testWrong += c.wrong;
+          testCfail += c.cfail;
+          testRfail += c.rfail;
+          testTotal += c.total;
+        });
+      } catch (e) { console.log('[Progress] Could not load test data'); }
+
+      // Calculate self-hosting percentage
+      // Weight: 40% words done, 30% tests passing, 20% phases, 10% capabilities
+      const wordsPct = total > 0 ? (done / (total - eliminated)) * 100 : 0;
+      const testsPct = testTotal > 0 ? (testPass / testTotal) * 100 : 0;
+      const phasesPct = phasesTotal > 0 ? (phasesDone / phasesTotal) * 100 : 0;
+      const selfHostPct = Math.round(wordsPct * 0.4 + testsPct * 0.3 + phasesPct * 0.2 + 10); // +10 for base capabilities
+
+      // Update self-hosting meter
+      document.getElementById('pr-self-host-pct').textContent = selfHostPct + '%';
+      document.getElementById('pr-self-host-bar').style.width = selfHostPct + '%';
+      document.getElementById('pr-self-host-label').textContent = `${done} words ported, ${testPass} tests passing, ${phasesDone} phases complete`;
+
+      // Update summary cards
+      document.getElementById('pr-words-done').textContent = done;
+      document.getElementById('pr-words-sub').textContent = `of ${total - eliminated} (${eliminated} eliminated)`;
+      document.getElementById('pr-words-bar').style.width = (done / (total - eliminated) * 100) + '%';
+
+      document.getElementById('pr-words-tested').textContent = tested;
+      document.getElementById('pr-tested-sub').textContent = `${Math.round(tested / total * 100)}% have tests`;
+      document.getElementById('pr-tested-bar').style.width = (tested / total * 100) + '%';
+
+      document.getElementById('pr-tests-pass').textContent = testPass;
+      document.getElementById('pr-tests-sub').textContent = `of ${testTotal} tests`;
+      document.getElementById('pr-tests-bar').style.width = testTotal > 0 ? (testPass / testTotal * 100) + '%' : '0%';
+
+      document.getElementById('pr-phases-done').textContent = phasesDone;
+      document.getElementById('pr-phases-sub').textContent = `of ${phasesTotal} phases`;
+      document.getElementById('pr-phases-bar').style.width = (phasesDone / phasesTotal * 100) + '%';
+
+      // Update breakdown
+      document.getElementById('pr-stat-done').textContent = done;
+      document.getElementById('pr-stat-pending').textContent = pending;
+      document.getElementById('pr-stat-redesign').textContent = redesign;
+      document.getElementById('pr-stat-elim').textContent = eliminated;
+      document.getElementById('pr-stat-total').textContent = total;
+
+      document.getElementById('pr-test-pass').textContent = testPass;
+      document.getElementById('pr-test-wrong').textContent = testWrong;
+      document.getElementById('pr-test-cfail').textContent = testCfail;
+      document.getElementById('pr-test-rfail').textContent = testRfail;
+      document.getElementById('pr-test-total').textContent = testTotal;
+
+      // Check capabilities
+      const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.name.toLowerCase()));
+      const capsEl = document.getElementById('pr-capabilities');
+      capsEl.innerHTML = CAPABILITIES.map(cap => {
+        const have = cap.words.filter(w => wordNames.has(w.toLowerCase())).length;
+        const need = cap.words.length;
+        const status = have === need ? 'done' : have > 0 ? 'partial' : 'missing';
+        const icon = status === 'done' ? '&#10003;' : status === 'partial' ? '&#9679;' : '&#10007;';
+        return `<div class="pr-cap ${status}"><span class="pr-cap-icon">${icon}</span><span class="pr-cap-text">${cap.name} (${have}/${need})</span></div>`;
+      }).join('');
+
+      // Find missing critical words
+      const missing = CRITICAL_WORDS.filter(w => !wordNames.has(w.toLowerCase()));
+      const missingEl = document.getElementById('pr-missing-list');
+      const missingSection = document.getElementById('pr-missing-section');
+      if (missing.length === 0) {
+        missingSection.style.display = 'none';
+      } else {
+        missingSection.style.display = 'block';
+        missingEl.innerHTML = missing.map(w => `<span class="pr-missing-word">${w}</span>`).join('');
+      }
+
+    } catch (err) {
+      console.error('[Progress] Error loading data:', err);
+    }
+  }
+
+  // Load on panel activation
+  document.addEventListener('DOMContentLoaded', () => {
+    // Initial load if panel is visible
+    if (document.getElementById('progress-view').classList.contains('active')) {
+      loadProgressData();
+    }
+
+    // Reload when tab is clicked
+    document.querySelector('[data-panel="progress-view"]')?.addEventListener('click', () => {
+      setTimeout(loadProgressData, 100);
+    });
+  });
+})();
+</script>
+</div>
+
 <div id="hw-view" class="panel">
 
   <!-- REGISTER FILES -->
