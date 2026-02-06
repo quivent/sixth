@@ -250,6 +250,61 @@ body {
 </style>
 </head>
 <body>
+<script>
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+function formatTimeUs(us) {
+  if (!us || us === 0) return '--';
+  if (us < 1000) return us + 'µs';
+  if (us < 1000000) return (us / 1000).toFixed(1) + 'ms';
+  return (us / 1000000).toFixed(2) + 's';
+}
+
+function formatRatio(ratio) {
+  if (!ratio || ratio === 0) return '--';
+  return ratio.toFixed(2) + 'x';
+}
+
+function ratioClass(ratio) {
+  if (ratio <= 0.9) return 'good';   // Sixth is faster
+  if (ratio >= 1.1) return 'bad';    // GCC is faster
+  return 'neutral';                   // ~equal
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function debounce(fn, delay) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+// Toast notification helper
+function showToast(message, type = 'info', duration = 3000) {
+  let toast = document.getElementById('toast-notification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast-notification';
+    toast.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:6px;font-family:SF Mono,monospace;font-size:12px;z-index:10001;transition:opacity 0.3s;opacity:0;pointer-events:none;';
+    document.body.appendChild(toast);
+  }
+  const colors = { info: '#7ecfff', success: '#51cf66', error: '#ff6b6b', warning: '#ffd700' };
+  toast.style.background = 'rgba(10,10,18,0.95)';
+  toast.style.border = `1px solid ${colors[type] || colors.info}`;
+  toast.style.color = colors[type] || colors.info;
+  toast.textContent = message;
+  toast.style.opacity = '1';
+  setTimeout(() => { toast.style.opacity = '0'; }, duration);
+}
+
+console.log('[Utils] Utility functions loaded');
+</script>
+
 <div id="tabs">
   <div class="tab active" data-panel="metrics-view">Snapshot</div>
   <div class="tab" data-panel="hw-view">Hardware</div>
