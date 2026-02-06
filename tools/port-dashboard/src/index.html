@@ -281,6 +281,26 @@ body {
     .pm-stat-sub { font-size: 10px; color: #888; }
     .pm-progress { height: 4px; background: #1a1a2a; border-radius: 2px; margin-top: 8px; overflow: hidden; }
     .pm-progress-fill { height: 100%; background: #51cf66; border-radius: 2px; transition: width 0.5s ease; }
+    /* Charts Area */
+    .pm-charts-area { display: grid; grid-template-columns: 280px 1fr; gap: 28px; margin-top: 24px; }
+    .pm-donut-col { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+    .pm-donut-wrap { position: relative; width: 200px; height: 200px; }
+    .pm-donut-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+    .pm-donut-total { font-size: 36px; font-weight: 700; color: #e0e0ee; }
+    .pm-donut-subtitle { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; margin-top: 4px; }
+    .pm-legend { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+    .pm-legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; }
+    .pm-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+    .pm-legend-label { color: #888; flex: 1; }
+    .pm-legend-count { color: #c0c0cc; font-weight: 600; min-width: 24px; text-align: right; }
+    .pm-bar-chart { display: flex; flex-direction: column; }
+    .pm-bar-row { display: grid; grid-template-columns: 130px 1fr 40px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(26,26,42,0.4); }
+    .pm-bar-label { font-size: 11px; color: #888; }
+    .pm-bar-label .pm-phase-num { color: #7ecfff; font-weight: 600; }
+    .pm-bar-track { height: 16px; background: #0d0d14; border-radius: 3px; overflow: hidden; display: flex; }
+    .pm-bar-seg { height: 100%; transition: width 1s ease; }
+    .pm-bar-total { font-size: 11px; color: #c0c0cc; font-weight: 600; text-align: right; }
+    .pm-bar-row.pm-empty .pm-bar-label, .pm-bar-row.pm-empty .pm-bar-total { color: #444; }
   </style>
   <div class="port-metrics">
     <div class="pm-section-header">Port Progress</div>
@@ -307,8 +327,116 @@ body {
         <div class="pm-stat-sub" id="pm-elim-sub">not needed</div>
       </div>
     </div>
+    <!-- Charts Area -->
+    <div class="pm-charts-area">
+      <div class="pm-donut-col">
+        <div class="pm-section-header">Word Status Breakdown</div>
+        <div class="pm-donut-wrap">
+          <svg viewBox="0 0 200 200" id="pmDonut" width="200" height="200"></svg>
+          <div class="pm-donut-center">
+            <div class="pm-donut-total" id="pm-donut-total">--</div>
+            <div class="pm-donut-subtitle">Total Words</div>
+          </div>
+        </div>
+        <div class="pm-legend">
+          <div class="pm-legend-item" onclick="showWordList && showWordList('done')">
+            <div class="pm-legend-dot" style="background:#51cf66;"></div>
+            <span class="pm-legend-label">Done</span>
+            <span class="pm-legend-count" id="pm-legend-done">--</span>
+          </div>
+          <div class="pm-legend-item" onclick="showWordList && showWordList('pending')">
+            <div class="pm-legend-dot" style="background:rgba(255,215,0,0.4);"></div>
+            <span class="pm-legend-label">Pending</span>
+            <span class="pm-legend-count" id="pm-legend-pending">--</span>
+          </div>
+          <div class="pm-legend-item" onclick="showWordList && showWordList('redesign')">
+            <div class="pm-legend-dot" style="background:#ff922b;"></div>
+            <span class="pm-legend-label">Redesign</span>
+            <span class="pm-legend-count" id="pm-legend-redesign">--</span>
+          </div>
+          <div class="pm-legend-item" onclick="showWordList && showWordList('eliminated')">
+            <div class="pm-legend-dot" style="background:rgba(255,107,107,0.6);"></div>
+            <span class="pm-legend-label">Eliminated</span>
+            <span class="pm-legend-count" id="pm-legend-elim">--</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="pm-section-header">Per-Phase Breakdown</div>
+        <div class="pm-bar-chart" id="pmBarChart"></div>
+      </div>
+    </div>
   </div>
   <script>
+  // Status colors
+  const STATUS_COLORS = { done: '#51cf66', pending: 'rgba(255,215,0,0.4)', redesign: '#ff922b', eliminated: 'rgba(255,107,107,0.6)' };
+  const PHASE_NAMES = ['Foundation','asm.fs','macho.fs','stack.fs','prims.fs','control.fs','io.fs','rstack.fs','main.fs','Integration','Testing'];
+
+  // Build donut chart
+  function buildDonutChart(done, pending, redesign, eliminated, total) {
+    const svg = document.getElementById('pmDonut');
+    if (!svg) return;
+    svg.innerHTML = '';
+    const cx = 100, cy = 100, R = 80, STROKE = 28;
+    const circumference = 2 * Math.PI * R;
+    const data = [
+      { count: done, color: STATUS_COLORS.done },
+      { count: pending, color: STATUS_COLORS.pending },
+      { count: redesign, color: STATUS_COLORS.redesign },
+      { count: eliminated, color: STATUS_COLORS.eliminated }
+    ];
+    let offset = 0;
+    data.forEach(seg => {
+      if (seg.count <= 0) return;
+      const fraction = seg.count / total;
+      const dashLen = fraction * circumference;
+      const gapLen = circumference - dashLen;
+      const rotation = -90 + (offset / total) * 360;
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', cx);
+      circle.setAttribute('cy', cy);
+      circle.setAttribute('r', R);
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', seg.color);
+      circle.setAttribute('stroke-width', STROKE);
+      circle.setAttribute('stroke-dasharray', `${dashLen} ${gapLen}`);
+      circle.setAttribute('transform', `rotate(${rotation} ${cx} ${cy})`);
+      svg.appendChild(circle);
+      offset += seg.count;
+    });
+  }
+
+  // Build bar chart
+  function buildBarChart(words) {
+    const container = document.getElementById('pmBarChart');
+    if (!container) return;
+    container.innerHTML = '';
+    const phaseData = [];
+    for (let i = 0; i <= 10; i++) {
+      const pw = words.filter(w => w.phase === i);
+      const counts = { done: 0, pending: 0, redesign: 0, eliminated: 0 };
+      pw.forEach(w => { if (counts.hasOwnProperty(w.status)) counts[w.status]++; });
+      phaseData.push({ phase: i, name: PHASE_NAMES[i] || `Phase ${i}`, ...counts });
+    }
+    const maxWords = Math.max(...phaseData.map(p => p.done + p.pending + p.redesign + p.eliminated), 1);
+    phaseData.forEach(p => {
+      const total = p.done + p.pending + p.redesign + p.eliminated;
+      const row = document.createElement('div');
+      row.className = 'pm-bar-row' + (total === 0 ? ' pm-empty' : '');
+      row.innerHTML = `
+        <div class="pm-bar-label"><span class="pm-phase-num">P${p.phase}</span> ${p.name}</div>
+        <div class="pm-bar-track">
+          ${p.done > 0 ? `<div class="pm-bar-seg" style="background:${STATUS_COLORS.done};width:${(p.done/maxWords)*100}%"></div>` : ''}
+          ${p.pending > 0 ? `<div class="pm-bar-seg" style="background:${STATUS_COLORS.pending};width:${(p.pending/maxWords)*100}%"></div>` : ''}
+          ${p.redesign > 0 ? `<div class="pm-bar-seg" style="background:${STATUS_COLORS.redesign};width:${(p.redesign/maxWords)*100}%"></div>` : ''}
+          ${p.eliminated > 0 ? `<div class="pm-bar-seg" style="background:${STATUS_COLORS.eliminated};width:${(p.eliminated/maxWords)*100}%"></div>` : ''}
+        </div>
+        <div class="pm-bar-total">${total || '-'}</div>
+      `;
+      container.appendChild(row);
+    });
+  }
+
   // Update snapshot metrics when word data is available
   function updateSnapshotMetrics() {
     const words = window.WORD_DATA || [];
@@ -328,6 +456,15 @@ body {
     document.getElementById('pm-pending').textContent = pending + redesign;
     document.getElementById('pm-pending-sub').textContent = `${pending} pending, ${redesign} redesign`;
     document.getElementById('pm-elim').textContent = eliminated;
+
+    // Update donut chart
+    document.getElementById('pm-donut-total').textContent = words.length;
+    document.getElementById('pm-legend-done').textContent = done;
+    document.getElementById('pm-legend-pending').textContent = pending;
+    document.getElementById('pm-legend-redesign').textContent = redesign;
+    document.getElementById('pm-legend-elim').textContent = eliminated;
+    buildDonutChart(done, pending, redesign, eliminated, words.length);
+    buildBarChart(words);
   }
 
   // Listen for word data updates
@@ -10558,5 +10695,119 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 </script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Phase data
+const PHASES = [
+  { id:0, name:'Phase 0: Foundation', status:'done', pos:[0,0,0], deps:[] },
+  { id:1, name:'Phase 1: asm.fs', status:'active', pos:[0,2.5,0], deps:[0] },
+  { id:2, name:'Phase 2: macho.fs', status:'pending', pos:[0,5,0], deps:[1] },
+  { id:3, name:'Phase 3: stack.fs', status:'pending', pos:[0,7.5,0], deps:[2] },
+  { id:4, name:'Phase 4: prims.fs', status:'pending', pos:[-3,10,0], deps:[3] },
+  { id:5, name:'Phase 5: control.fs', status:'pending', pos:[0,10,0], deps:[3] },
+  { id:6, name:'Phase 6: io.fs', status:'pending', pos:[3,10,0], deps:[3] },
+  { id:7, name:'Phase 7: rstack.fs', status:'pending', pos:[0,13,0], deps:[4,5,6] },
+  { id:8, name:'Phase 8: main.fs', status:'pending', pos:[0,15.5,0], deps:[7] },
+  { id:9, name:'Phase 9: Tests', status:'pending', pos:[0,18,0], deps:[8] },
+  { id:10, name:'Phase 10: Self-Host', status:'pending', pos:[0,20.5,0], deps:[9] },
+];
+
+const container = document.getElementById('canvas-container');
+if (!container) {
+  console.error('[THREE] canvas-container not found');
+} else {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x08080d);
+  scene.fog = new THREE.FogExp2(0x08080d, 0.02);
+
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 200);
+  camera.position.set(12, 12, 20);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 10, 0);
+  controls.enableDamping = true;
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0x333344, 0.8));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.5);
+  dl.position.set(5, 20, 10);
+  scene.add(dl);
+
+  // Status colors
+  const colors = { done: 0x51cf66, active: 0xffd700, pending: 0x555566 };
+
+  // Create phase nodes
+  const nodes = [];
+  PHASES.forEach(p => {
+    const geo = new THREE.SphereGeometry(0.5, 32, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      color: colors[p.status] || colors.pending,
+      emissive: colors[p.status] || colors.pending,
+      emissiveIntensity: p.status === 'done' ? 0.3 : 0.1
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(...p.pos);
+    mesh.userData = p;
+    scene.add(mesh);
+    nodes.push({ phase: p, mesh });
+  });
+
+  // Create connections
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x333344 });
+  PHASES.forEach(p => {
+    p.deps.forEach(depId => {
+      const dep = PHASES.find(x => x.id === depId);
+      if (dep) {
+        const pts = [new THREE.Vector3(...dep.pos), new THREE.Vector3(...p.pos)];
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        scene.add(new THREE.Line(geo, lineMat));
+      }
+    });
+  });
+
+  function resize() {
+    const w = container.clientWidth || window.innerWidth;
+    const h = container.clientHeight || 600;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    // Gentle pulse on active node
+    nodes.forEach(n => {
+      if (n.phase.status === 'active') {
+        n.mesh.scale.setScalar(1 + Math.sin(Date.now() * 0.003) * 0.1);
+      }
+    });
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', resize);
+  setTimeout(resize, 100);
+
+  console.log('[THREE] Pipeline initialized with', PHASES.length, 'phases');
+}
+</script>
+
 </body>
 </html>
