@@ -832,8 +832,37 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-tested-sub').textContent = Math.round(tested / total * 100) + '% have tests';
       document.getElementById('pr-tested-bar').style.width = (tested / total * 100) + '%';
 
-      document.getElementById('pr-tests-pass').textContent = '--';
-      document.getElementById('pr-tests-sub').textContent = 'use Tests tab';
+      // Fetch test history for real data
+      window.__TAURI__.core.invoke('get_test_history').then(history => {
+        if (history && history.length > 0) {
+          const latest = history[0];
+          const passRate = latest.total > 0 ? Math.round((latest.pass / latest.total) * 100) : 0;
+
+          document.getElementById('pr-tests-pass').textContent = latest.pass;
+          document.getElementById('pr-tests-sub').textContent = 'of ' + latest.total + ' tests (' + passRate + '%)';
+          document.getElementById('pr-tests-bar').style.width = passRate + '%';
+
+          document.getElementById('pr-test-pass').textContent = latest.pass;
+          document.getElementById('pr-test-wrong').textContent = latest.wrong;
+          document.getElementById('pr-test-cfail').textContent = latest.cfail;
+          document.getElementById('pr-test-rfail').textContent = latest.rfail;
+          document.getElementById('pr-test-total').textContent = latest.total;
+
+          // Update self-hosting percentage based on test pass rate
+          const testScore = passRate * 0.3;
+          const updatedSelfHost = Math.round(wordsPct * 0.6 + testScore + 5);
+          document.getElementById('pr-self-host-pct').textContent = updatedSelfHost + '%';
+          document.getElementById('pr-self-host-bar').style.width = updatedSelfHost + '%';
+        } else {
+          document.getElementById('pr-tests-pass').textContent = '--';
+          document.getElementById('pr-tests-sub').textContent = 'run tests first';
+          document.getElementById('pr-test-pass').textContent = '--';
+          document.getElementById('pr-test-wrong').textContent = '--';
+          document.getElementById('pr-test-cfail').textContent = '--';
+          document.getElementById('pr-test-rfail').textContent = '--';
+          document.getElementById('pr-test-total').textContent = '--';
+        }
+      }).catch(err => console.warn('[Progress] Test history error:', err));
 
       document.getElementById('pr-phases-done').textContent = '1';
       document.getElementById('pr-phases-sub').textContent = 'of 11 phases';
@@ -845,12 +874,6 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-stat-redesign').textContent = redesign;
       document.getElementById('pr-stat-elim').textContent = eliminated;
       document.getElementById('pr-stat-total').textContent = total;
-
-      document.getElementById('pr-test-pass').textContent = '--';
-      document.getElementById('pr-test-wrong').textContent = '--';
-      document.getElementById('pr-test-cfail').textContent = '--';
-      document.getElementById('pr-test-rfail').textContent = '--';
-      document.getElementById('pr-test-total').textContent = '~1693';
 
       // Capabilities
       const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.word.toLowerCase()));
@@ -6731,6 +6754,87 @@ LDR   X19, [X9]</pre>
     border-radius: 2px;
     color: var(--ts-text);
   }
+
+  /* ── Test History Section ── */
+  .ts-history {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--ts-border);
+  }
+  .ts-history h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ts-text-bright);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ts-history h2 .badge {
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: rgba(81,207,102,0.15);
+    color: var(--ts-pass);
+  }
+  .ts-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .ts-history-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--ts-bg-raised);
+    color: var(--ts-text-dim);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--ts-border);
+  }
+  .ts-history-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ts-border);
+  }
+  .ts-history-table tr:hover {
+    background: var(--ts-bg-hover);
+  }
+  .ts-history-table .ts-pass-cell { color: var(--ts-pass); font-weight: 600; }
+  .ts-history-table .ts-fail-cell { color: var(--ts-fail); font-weight: 600; }
+  .ts-history-table .ts-time { color: var(--ts-text-dim); font-size: 10px; }
+  .ts-history-table .ts-date { color: var(--ts-accent-dim); }
+  .ts-history-empty {
+    color: var(--ts-text-dim);
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+  }
+  .ts-history-chart {
+    height: 60px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    margin-bottom: 16px;
+    padding: 0 4px;
+  }
+  .ts-history-bar {
+    flex: 1;
+    min-width: 8px;
+    max-width: 24px;
+    border-radius: 2px 2px 0 0;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    position: relative;
+  }
+  .ts-history-bar:hover {
+    opacity: 0.8;
+    transform: scaleY(1.05);
+    transform-origin: bottom;
+  }
+  .ts-history-bar.perfect { background: var(--ts-pass); }
+  .ts-history-bar.good { background: #7ecfff; }
+  .ts-history-bar.issues { background: #ffc107; }
+  .ts-history-bar.failing { background: var(--ts-fail); }
 </style>
 
 <!-- Header -->
@@ -6783,6 +6887,29 @@ LDR   X19, [X9]</pre>
   <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#ffc107; border-radius:1px;"></span> Hard</span>
   <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#ff6b6b; border-radius:1px;"></span> Expert</span>
   <span style="display:flex; align-items:center; gap:4px;"><span style="width:3px; height:10px; background:#b388ff; border-radius:1px;"></span> ANS Standard</span>
+</div>
+
+<!-- Test History Section -->
+<div class="ts-history" id="ts-history-section" style="display:none;">
+  <h2>Test Run History <span class="badge" id="ts-history-badge">0 runs</span></h2>
+  <div class="ts-history-chart" id="ts-history-chart"></div>
+  <table class="ts-history-table">
+    <thead>
+      <tr>
+        <th>Run</th>
+        <th>Date</th>
+        <th>Pass</th>
+        <th>Wrong</th>
+        <th>CFail</th>
+        <th>RFail</th>
+        <th>Total</th>
+        <th>Wall Time</th>
+        <th>Compile</th>
+      </tr>
+    </thead>
+    <tbody id="ts-history-body">
+    </tbody>
+  </table>
 </div>
 
 <!-- Category Tabs -->
@@ -7143,12 +7270,66 @@ async function runAllTests() {
       activeCategory = TEST_CATEGORIES[0].category;
     }
     render();
+    loadTestHistory(); // Refresh history after test run
   } catch (err) {
     alert('Error running tests: ' + err);
   } finally {
     isLoading = false;
     btn.textContent = '▶ Run All Tests';
     btn.style.opacity = '1';
+  }
+}
+
+// ── Test History ──
+async function loadTestHistory() {
+  if (!window.__TAURI__) return;
+
+  try {
+    const history = await window.__TAURI__.core.invoke('get_test_history');
+    const section = document.getElementById('ts-history-section');
+    const body = document.getElementById('ts-history-body');
+    const chart = document.getElementById('ts-history-chart');
+    const badge = document.getElementById('ts-history-badge');
+
+    if (!history || history.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    badge.textContent = `${history.length} run${history.length !== 1 ? 's' : ''}`;
+
+    // Render chart (visual bars for pass rate)
+    const maxTotal = Math.max(...history.map(h => h.total));
+    chart.innerHTML = history.slice(0, 20).reverse().map(run => {
+      const passRate = run.total > 0 ? (run.pass / run.total) * 100 : 0;
+      const height = run.total > 0 ? (run.total / maxTotal) * 100 : 10;
+      const barClass = passRate === 100 ? 'perfect' : passRate >= 95 ? 'good' : passRate >= 80 ? 'issues' : 'failing';
+      return `<div class="ts-history-bar ${barClass}" style="height:${Math.max(height, 5)}%;" title="Run #${run.id}: ${run.pass}/${run.total} (${passRate.toFixed(1)}%)"></div>`;
+    }).join('');
+
+    // Render table
+    body.innerHTML = history.slice(0, 10).map(run => {
+      const passRate = run.total > 0 ? ((run.pass / run.total) * 100).toFixed(1) : '0';
+      const wallSec = (run.wall_ms / 1000).toFixed(1);
+      const compileSec = (run.compile_ms / 1000).toFixed(1);
+      const failCount = run.wrong + run.cfail + run.rfail;
+      return `<tr>
+        <td>#${run.id}</td>
+        <td class="ts-date">${run.run_at}</td>
+        <td class="ts-pass-cell">${run.pass}</td>
+        <td class="${run.wrong > 0 ? 'ts-fail-cell' : ''}">${run.wrong}</td>
+        <td class="${run.cfail > 0 ? 'ts-fail-cell' : ''}">${run.cfail}</td>
+        <td class="${run.rfail > 0 ? 'ts-fail-cell' : ''}">${run.rfail}</td>
+        <td>${run.total} <span class="ts-time">(${passRate}%)</span></td>
+        <td class="ts-time">${wallSec}s</td>
+        <td class="ts-time">${compileSec}s</td>
+      </tr>`;
+    }).join('');
+
+    console.log('[Tests] Loaded test history:', history.length, 'runs');
+  } catch (err) {
+    console.error('[Tests] Error loading test history:', err);
   }
 }
 
@@ -7163,12 +7344,14 @@ console.log('[Tests] Calling loadTests()...');
 // Wait a moment for Tauri to initialize
 if (window.__TAURI__) {
   loadTests();
+  loadTestHistory();
 } else {
   console.log('[Tests] Tauri not ready, waiting...');
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       console.log('[Tests] Retrying loadTests after delay, __TAURI__:', !!window.__TAURI__);
       loadTests();
+      loadTestHistory();
     }, 500);
   });
 }
@@ -10858,6 +11041,24 @@ document.querySelectorAll('.tab').forEach(tab => {
   transform: none;
   box-shadow: none;
 }
+.bench-single-btn {
+  padding: 4px 10px;
+  background: #2a2a3a;
+  color: #7ecfff;
+  border: 1px solid #3a3a4a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s ease;
+}
+.bench-single-btn:hover {
+  background: #3a3a4a;
+  border-color: #7ecfff;
+}
+.bench-single-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .bench-summary {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -11102,7 +11303,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     <table class="bench-table">
       <thead>
         <tr>
-          <th style="width: 20px"></th>
+          <th style="width: 50px">Run</th>
           <th>Benchmark</th>
           <th>Category</th>
           <th>Sixth (median)</th>
@@ -11183,6 +11384,58 @@ function renderBenchmarkResults(summary) {
   tbody.innerHTML = html || '<tr><td colspan="11">No results</td></tr>';
 }
 
+async function runSingleBenchmark(name) {
+  if (!window.__TAURI__) {
+    alert('Benchmarks require Tauri backend');
+    return;
+  }
+  const btn = document.querySelector(`button[data-bench="${name}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '...';
+  }
+  try {
+    console.log('[Benchmarks] Running single benchmark:', name);
+    const result = await window.__TAURI__.core.invoke('run_benchmark', { name });
+    console.log('[Benchmarks] Result:', result);
+    if (result) {
+      // Update the row with results
+      const row = document.querySelector(`tr[data-bench-row="${name}"]`);
+      if (row) {
+        const sixthUs = result.sixth_run?.median_us || 0;
+        const o0Us = result.gcc_runs?.o0?.median_us || 0;
+        const o1Us = result.gcc_runs?.o1?.median_us || 0;
+        const o2Us = result.gcc_runs?.o2?.median_us || 0;
+        const o3Us = result.gcc_runs?.o3?.median_us || 0;
+        const ratioO2 = o2Us > 0 ? sixthUs / o2Us : 0;
+        const ratioO3 = o3Us > 0 ? sixthUs / o3Us : 0;
+        const correct = result.correct ? '✓' : '✗';
+        const correctClass = result.correct ? 'good' : 'bad';
+        row.innerHTML = `
+          <td><button class="bench-single-btn" data-bench="${name}" onclick="runSingleBenchmark('${name}')">▶</button></td>
+          <td>${name}</td>
+          <td>${result.category || '--'}</td>
+          <td>${formatTimeUs(sixthUs)}</td>
+          <td>${formatTimeUs(o0Us)}</td>
+          <td>${formatTimeUs(o1Us)}</td>
+          <td>${formatTimeUs(o2Us)}</td>
+          <td>${formatTimeUs(o3Us)}</td>
+          <td class="${ratioClass(ratioO2)}">${formatRatio(ratioO2)}</td>
+          <td class="${ratioClass(ratioO3)}">${formatRatio(ratioO3)}</td>
+          <td class="${correctClass}">${correct}</td>
+        `;
+      }
+    }
+  } catch (e) {
+    console.error('[Benchmarks] Error running benchmark:', e);
+    alert('Error: ' + e);
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '▶';
+  }
+}
+
 // Wire up button click and auto-load benchmark list
 document.addEventListener('DOMContentLoaded', async () => {
   const btn = document.getElementById('bench-run-all');
@@ -11200,7 +11453,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (tbody && benchmarks && benchmarks.length > 0) {
         let html = '';
         for (const b of benchmarks) {
-          html += `<tr><td>${b.name}</td><td>${b.description}</td><td>--</td></tr>`;
+          html += `<tr data-bench-row="${b.name}">
+            <td><button class="bench-single-btn" data-bench="${b.name}" onclick="runSingleBenchmark('${b.name}')">▶</button></td>
+            <td>${b.name}</td>
+            <td>${b.category || '--'}</td>
+            <td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td><td>--</td>
+          </tr>`;
         }
         tbody.innerHTML = html;
       }
