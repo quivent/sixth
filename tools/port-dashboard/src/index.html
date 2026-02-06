@@ -8965,10 +8965,11 @@ if (window.__TAURI__) {
 }
 .tracker-stat .stat-value { font-size: 2rem; font-weight: 700; }
 .tracker-stat .stat-label { font-size: 0.75rem; color: #999; text-transform: uppercase; letter-spacing: 1px; }
-.stat-green { color: #4caf50; }
-.stat-orange { color: #ff9800; }
-.stat-blue { color: #2196f3; }
-.stat-red { color: #f44336; }
+/* Word status colors - match STATUS_COLORS in donut chart */
+.stat-done { color: #51cf66; }      /* done: green */
+.stat-pending { color: #ffd700; }   /* pending: gold */
+.stat-redesign { color: #ff922b; }  /* redesign: orange */
+.stat-elim { color: #ff6b6b; }      /* eliminated: red/pink */
 .stat-gray { color: #607d8b; }
 .stat-purple { color: #9c27b0; }
 .tracker-stat-header {
@@ -9182,15 +9183,15 @@ if (window.__TAURI__) {
     if (statsEl) {
       statsEl.innerHTML = `
         <div class="tracker-stat-header">Words</div>
-        <div class="tracker-stat"><div class="stat-value stat-green">${done}</div><div class="stat-label">Done</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-orange">${pending}</div><div class="stat-label">Pending</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-blue">${redesign}</div><div class="stat-label">Redesign</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-red">${eliminated}</div><div class="stat-label">Elim</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-done">${done}</div><div class="stat-label">Done</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-pending">${pending}</div><div class="stat-label">Pending</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-redesign">${redesign}</div><div class="stat-label">Redesign</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-elim">${eliminated}</div><div class="stat-label">Elim</div></div>
         <div class="tracker-stat"><div class="stat-value stat-gray">${total}</div><div class="stat-label">Total</div></div>
         <div class="tracker-stat"><div class="stat-value stat-purple">${pctDone}%</div><div class="stat-label">Progress</div></div>
         <div class="tracker-stat-header">Phases</div>
-        <div class="tracker-stat"><div class="stat-value stat-green">${phasesDone}</div><div class="stat-label">Done</div></div>
-        <div class="tracker-stat"><div class="stat-value stat-orange">${phasesTotal}</div><div class="stat-label">Total</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-done">${phasesDone}</div><div class="stat-label">Done</div></div>
+        <div class="tracker-stat"><div class="stat-value stat-gray">${phasesTotal}</div><div class="stat-label">Total</div></div>
       `;
     }
 
