@@ -6743,6 +6743,7 @@ function render() {
 }
 
 async function loadTests() {
+  console.log('[Tests] loadTests called, __TAURI__:', !!window.__TAURI__);
   if (!window.__TAURI__) {
     document.getElementById('ts-tabs').innerHTML = '<div style="padding:10px;color:#ff9800;">Tests require the Tauri desktop app</div>';
     return;
@@ -6751,12 +6752,20 @@ async function loadTests() {
   document.getElementById('ts-tabs').innerHTML = '<div style="padding:10px;color:var(--ts-text-dim);">Loading tests...</div>';
 
   try {
+    console.log('[Tests] Invoking scan_all_tests...');
     TEST_CATEGORIES = await window.__TAURI__.core.invoke('scan_all_tests');
-    if (TEST_CATEGORIES.length > 0) {
+    console.log('[Tests] Got categories:', TEST_CATEGORIES?.length, TEST_CATEGORIES);
+    if (TEST_CATEGORIES && TEST_CATEGORIES.length > 0) {
       activeCategory = TEST_CATEGORIES[0].category;
+      console.log('[Tests] Active category:', activeCategory);
+    } else {
+      console.warn('[Tests] No categories returned');
+      document.getElementById('ts-tabs').innerHTML = '<div style="padding:10px;color:#ff9800;">No test categories found. Check console.</div>';
+      return;
     }
     render();
   } catch (err) {
+    console.error('[Tests] Error loading tests:', err);
     document.getElementById('ts-tabs').innerHTML = `<div style="padding:10px;color:#ff6b6b;">Error: ${err}</div>`;
   }
 }
