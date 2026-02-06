@@ -285,21 +285,60 @@ body {
     <div class="pm-metrics-row">
       <div class="pm-stat-card">
         <div class="pm-stat-label">Words Ported</div>
-        <div class="pm-stat-value">--</div>
-        <div class="pm-stat-sub">loading...</div>
+        <div class="pm-stat-value" id="pm-words-done">--</div>
+        <div class="pm-stat-sub" id="pm-words-sub">loading...</div>
       </div>
       <div class="pm-stat-card">
         <div class="pm-stat-label">Tests Passing</div>
-        <div class="pm-stat-value">--</div>
-        <div class="pm-stat-sub">loading...</div>
+        <div class="pm-stat-value" id="pm-tests-pass">--</div>
+        <div class="pm-stat-sub" id="pm-tests-sub">loading...</div>
       </div>
       <div class="pm-stat-card">
-        <div class="pm-stat-label">Files Complete</div>
-        <div class="pm-stat-value">--</div>
-        <div class="pm-stat-sub">loading...</div>
+        <div class="pm-stat-label">Pending</div>
+        <div class="pm-stat-value" id="pm-pending">--</div>
+        <div class="pm-stat-sub" id="pm-pending-sub">to port</div>
       </div>
     </div>
   </div>
+  <script>
+  // Update snapshot metrics when word data is available
+  function updateSnapshotMetrics() {
+    const words = window.WORD_DATA || [];
+    if (words.length === 0) return;
+
+    let done = 0, pending = 0, redesign = 0;
+    words.forEach(w => {
+      if (w.status === 'done') done++;
+      else if (w.status === 'pending') pending++;
+      else if (w.status === 'redesign') redesign++;
+    });
+
+    document.getElementById('pm-words-done').textContent = done;
+    document.getElementById('pm-words-sub').textContent = `of ${words.length} total`;
+    document.getElementById('pm-pending').textContent = pending + redesign;
+    document.getElementById('pm-pending-sub').textContent = `${pending} pending, ${redesign} redesign`;
+  }
+
+  // Listen for word data updates
+  window.addEventListener('word-data-loaded', updateSnapshotMetrics);
+
+  // Load word data from Tauri
+  async function loadWordData() {
+    if (!window.__TAURI__) {
+      document.getElementById('pm-words-sub').textContent = 'Tauri not available';
+      return;
+    }
+    try {
+      const words = await window.__TAURI__.core.invoke('get_word_data');
+      window.WORD_DATA = words;
+      updateSnapshotMetrics();
+    } catch (e) {
+      console.error('Failed to load word data:', e);
+      document.getElementById('pm-words-sub').textContent = 'Error loading';
+    }
+  }
+  loadWordData();
+  </script>
 </div>
 <div id="hw-view" class="panel">
 
