@@ -47,9 +47,11 @@
 \   [X20 + 0] = here pointer (initialized to X20 + here-offset)
 \   [X20 + 8 ...] = variable storage, then here-allocated data
 : gen-prologue ( here-offset -- )
-  22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack)
-  28 31 3072 arm-sub-imm emit32     \ SUB X28, SP, #3072 (return stack)
-  20 31 4080 arm-sub-imm emit32     \ SUB X20, SP, #4080 (variable/here base)
+  22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack: 2KB)
+  28 31 3072 arm-sub-imm emit32     \ SUB X28, SP, #3072 (return stack: 1KB)
+  \ X20 = X28 - 4096 (4KB for here/allot, using X28 as base since SP encoding is tricky)
+  20 28 4095 arm-sub-imm emit32     \ SUB X20, X28, #4095
+  20 20 1 arm-sub-imm emit32        \ SUB X20, X20, #1 (X20 = X28 - 4096)
   \ Initialize here pointer: [X20] = X20 + here-offset
   dup $1000 < if
     9 20 rot arm-add-imm emit32     \ ADD X9, X20, #offset (fits in imm12)

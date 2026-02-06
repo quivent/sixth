@@ -190,17 +190,39 @@ variable cf-sp  0 cf-sp !
   \ ( limit index -- ) ( R: -- limit index ) OR skip if index >= limit
   \ Check BEFORE pushing to return stack for efficiency
   \ TOS=index (X19), NOS=limit (on stack)
+  \ Returns: orig=skip-forward-branch (with bit 0 set), dest=body address
+  \ For ascending LOOP: skip if index >= limit (no iterations)
+  \ For +LOOP: gen-+loop will NOP this out (boundary crossing handles both directions)
   9 22 0 arm-ldr-off emit32          \ LDR X9, [X22] (limit = NOS)
   19 9 arm-cmp-reg emit32            \ CMP X19, X9 (index - limit)
-  code-here                          \ skip-orig for ?DO skip branch
-  1 or                               \ Set bit 0 to mark as ?DO (patch past cleanup)
-  $5400000A emit32                   \ B.GE skip (placeholder)
-  \ If index < limit, proceed with normal loop setup
+  code-here                          \ ( bge-addr ) for patching B.GE
+  $5400000A emit32                   \ B.GE skip-cleanup (cond=GE=0xA)
+
+  \ === NORMAL PATH (index < limit for ascending): setup rstack, goto body ===
   pop-nos                            \ X9 = limit
   9 28 -8 arm-str-pre emit32         \ STR X9, [X28, #-8]! (push limit)
   19 28 -8 arm-str-pre emit32        \ STR X19, [X28, #-8]! (push index)
-  emit-drop                          \ pop index from data stack
-  code-here ;                        \ dest = loop body (orig is skip branch)
+  emit-drop                          \ drop index from dstack
+  code-here                          \ ( bge-addr b-body-addr )
+  0 arm-b emit32                     \ B body (placeholder, skip over cleanup code)
+
+  \ === SKIP PATH (index >= limit): cleanup dstack, goto after-loop ===
+  \ B.GE lands here - patch it now
+  code-here rot                      \ ( b-body-addr skip-start bge-addr )
+  code-here swap patch-branch        \ patch B.GE at bge-addr -> skip-start
+  drop                               \ ( b-body-addr )
+  emit-drop                          \ drop index -> X19=limit
+  emit-drop                          \ drop limit -> X19=value_below
+  code-here                          \ ( b-body-addr skip-fwd-addr )
+  1 or                               \ mark as ?DO (bit 0)
+  0 arm-b emit32                     \ B after-loop (placeholder, patched by gen-loop)
+
+  \ === BODY starts here ===
+  code-here                          \ ( b-body-addr skip-fwd|1 body-addr )
+  rot                                \ ( skip-fwd|1 body-addr b-body-addr )
+  over swap                          \ ( skip-fwd|1 body-addr body-addr b-body-addr )
+  patch-branch-uncond ;              \ patch B body -> body-addr
+                                     \ returns ( orig dest ) = ( skip-fwd|1 body-addr )
 
 : gen-loop ( orig dest -- )
   \ Increment index, compare with limit, branch back if index < limit
@@ -222,11 +244,11 @@ variable cf-sp  0 cf-sp !
   emit32
   \ Patch skip branch - check ?DO marker (bit 0)
   cf-pop dup 1 and if
-    \ ?DO: patch to AFTER cleanup (skip never pushed to rstack)
-    1 xor                            \ clear bit 0
-    code-here 4 + swap patch-branch  \ patch to after ADD
+    \ ?DO: patch unconditional B to AFTER cleanup (skip never pushed to rstack)
+    1 xor                                  \ clear bit 0
+    code-here 4 + swap patch-branch-uncond \ patch B to after ADD
   else
-    \ DO: patch to cleanup
+    \ DO: patch conditional B.GE to cleanup
     code-here swap patch-branch
   then
   \ Clean up return stack: drop limit and index
@@ -236,10 +258,14 @@ variable cf-sp  0 cf-sp !
   \ Add TOS to index, check for bounds crossing, branch back if not done
   \ ( n -- ) adds n to index
   \ Return stack: [X28]=index, [X28+8]=limit (offset in cells)
-  \ orig bit 0: 0=DO (NOP the check), 1=?DO (keep check, patch past cleanup)
+  \ orig bit 0: 0=DO (NOP the check), 1=?DO (NOP check, patch skip past cleanup)
+  \ For +LOOP, NOP out the B.GE check for BOTH DO and ?DO because
+  \ the XOR boundary crossing handles termination for both directions
   swap dup 1 and if
-    \ ?DO: save orig for later patching (don't NOP)
+    \ ?DO: save orig for later patching, AND NOP out the B.GE
     cf-push
+    \ B.GE is at dest - 36 bytes (9 instructions before body)
+    dup 36 - code-buf + $D503201F swap l!
   else
     \ DO: NOP out the B.GE (it's wrong for negative steps)
     code-buf + $D503201F swap l!
@@ -267,8 +293,8 @@ variable cf-sp  0 cf-sp !
   \ Patch ?DO skip branch if present (check cf-stack depth changed)
   cf-sp @ 0> if
     cf-pop dup 1 and if
-      1 xor                          \ clear bit 0
-      code-here 4 + swap patch-branch  \ patch to after cleanup
+      1 xor                                  \ clear bit 0
+      code-here 4 + swap patch-branch-uncond \ patch B to after cleanup
     then
   then
   \ Clean up return stack
@@ -281,6 +307,10 @@ variable cf-sp  0 cf-sp !
 : emit-j ( -- )  \ ( -- index ) copy outer loop index to data stack
   push-tos                           \ save TOS
   19 28 2 arm-ldr-off emit32 ;       \ LDR X19, [X28, #16] (skip inner index+limit = 2*8)
+
+: emit-k ( -- )  \ ( -- index ) copy third-level loop index to data stack
+  push-tos                           \ save TOS
+  19 28 4 arm-ldr-off emit32 ;       \ LDR X19, [X28, #32] (skip 2 loops = 4*8)
 
 : emit-unloop ( -- )  \ ( R: limit index -- ) remove loop params from return stack
   28 28 16 arm-add-imm emit32 ;      \ ADD X28, X28, #16

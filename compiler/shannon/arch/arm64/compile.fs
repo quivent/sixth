@@ -162,12 +162,14 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   -rot 2drop ;                \ clean up and return flag
 
 : dict-find ( addr u -- code-addr true | false )
-  \ Look up word in dictionary
+  \ Look up word in dictionary (search from newest to oldest for shadowing)
   \ Returns code-addr and true if found, just false if not found
   dict-count @ 0 ?do
-    2dup i dict-entry dict-name= if
-      2drop i dict-entry 16 + @ true unloop exit
+    dict-count @ i - 1-             \ reverse index: dict-count-1-i
+    >r 2dup r@ dict-entry dict-name= if
+      2drop r> dict-entry 16 + @ true unloop exit
     then
+    r> drop
   loop
   2drop false ;
 
@@ -462,6 +464,7 @@ variable str-len                       \ length of parsed string
   2dup s" +loop" str= if 2drop cf-pop cf-pop gen-+loop true exit then
   2dup s" i" str= if 2drop emit-i true exit then
   2dup s" j" str= if 2drop emit-j true exit then
+  2dup s" k" str= if 2drop emit-k true exit then
   2dup s" leave" str= if 2drop gen-leave true exit then
   2dup s" unloop" str= if 2drop emit-unloop true exit then
   2dup s" exit" str= if 2drop emit-exit true exit then
