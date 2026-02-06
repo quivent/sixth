@@ -148,14 +148,18 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
   1 dict-count +! ;
 
 : dict-name= ( addr1 u1 entry -- flag )
-  \ Compare name with dictionary entry name (u1 chars only)
+  \ Compare name with dictionary entry name (exact match required)
   \ NOTE: Use variable, not >r, because this is called from within ?do loop
   entry-var !                 \ save entry addr in variable
   dup 16 > if drop 16 then    \ limit lookup len to 16
+  \ First compare all u1 characters
   dup 0 ?do
     over i + c@ entry-var @ i + c@ <> if 2drop false unloop exit then
   loop
-  2drop true ;
+  \ Then verify entry has no more characters (entry[u1] must be 0 or space)
+  dup entry-var @ + c@        \ get char at position u1 in entry
+  dup 0= swap 32 = or         \ must be null or space
+  -rot 2drop ;                \ clean up and return flag
 
 : dict-find ( addr u -- code-addr true | false )
   \ Look up word in dictionary
