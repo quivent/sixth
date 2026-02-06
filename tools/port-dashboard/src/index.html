@@ -10849,5 +10849,57 @@ if (!container) {
 }
 </script>
 
+<!-- Word List Modal -->
+<div id="wordListModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:10000; overflow:auto;">
+  <div style="max-width:800px; margin:50px auto; background:#1a1a2e; border:1px solid #333; border-radius:8px; max-height:calc(100vh - 100px); overflow:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid #333; position:sticky; top:0; background:#1a1a2e; z-index:1;">
+      <h2 id="wordListTitle" style="margin:0; color:#e0e0e0; font-size:1.2rem;"></h2>
+      <button onclick="closeWordListModal()" style="background:none; border:none; color:#888; font-size:24px; cursor:pointer;">&times;</button>
+    </div>
+    <div id="wordListContent" style="padding:20px;"></div>
+  </div>
+</div>
+
+<script>
+function showWordList(status) {
+  const words = window.WORD_DATA || [];
+  const filtered = words.filter(w => w.status === status);
+
+  const colors = { done: '#51cf66', pending: '#ffd700', redesign: '#ff922b', eliminated: '#ff6b6b' };
+  const titles = { done: 'Done Words', pending: 'Pending Words', redesign: 'Redesign Words', eliminated: 'Eliminated Words' };
+
+  document.getElementById('wordListTitle').innerHTML = `<span style="color:${colors[status]}">${titles[status]}</span> (${filtered.length})`;
+
+  let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+  filtered.forEach(w => {
+    html += `<span style="
+      background:rgba(255,255,255,0.05);
+      border:1px solid ${colors[status]}40;
+      color:${colors[status]};
+      padding:6px 12px;
+      border-radius:4px;
+      font-family:monospace;
+      font-size:0.9rem;
+    " title="${w.note || ''}">${w.word}</span>`;
+  });
+  html += '</div>';
+
+  document.getElementById('wordListContent').innerHTML = html;
+  document.getElementById('wordListModal').style.display = 'block';
+}
+
+function closeWordListModal() {
+  document.getElementById('wordListModal').style.display = 'none';
+}
+
+// Close modal on escape or click outside
+document.getElementById('wordListModal').addEventListener('click', function(e) {
+  if (e.target === this) closeWordListModal();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeWordListModal();
+});
+</script>
+
 </body>
 </html>
