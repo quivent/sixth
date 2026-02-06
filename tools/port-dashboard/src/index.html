@@ -812,7 +812,7 @@ console.log('[Utils] Utility functions loaded');
       const redesign = words.filter(w => w.status === 'redesign').length;
       const eliminated = words.filter(w => w.status === 'eliminated').length;
       const total = words.length;
-      const tested = words.filter(w => w.has_test).length;
+      const tested = words.filter(w => w.tests && w.tests.length > 0).length;
 
       timestamp.textContent = 'Last updated: ' + new Date().toLocaleString();
 
@@ -853,7 +853,7 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-test-total').textContent = '~1693';
 
       // Capabilities
-      const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.name.toLowerCase()));
+      const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.word.toLowerCase()));
       const capsEl = document.getElementById('pr-capabilities');
       if (capsEl) {
         capsEl.innerHTML = CAPABILITIES.map(cap => {
@@ -879,21 +879,21 @@ console.log('[Utils] Utility functions loaded');
       }
 
       // Test coverage lists
-      const testedWords = words.filter(w => w.has_test).sort((a,b) => a.name.localeCompare(b.name));
-      const untestedWords = words.filter(w => !w.has_test && w.status === 'done').sort((a,b) => a.name.localeCompare(b.name));
+      const testedWords = words.filter(w => w.tests && w.tests.length > 0).sort((a,b) => a.word.localeCompare(b.word));
+      const untestedWords = words.filter(w => (!w.tests || w.tests.length === 0) && w.status === 'done').sort((a,b) => a.word.localeCompare(b.word));
 
       document.getElementById('pr-tested-count').textContent = testedWords.length;
       document.getElementById('pr-untested-count').textContent = untestedWords.length;
 
       var testedEl = document.getElementById('pr-tested-words');
       if (testedEl) {
-        testedEl.innerHTML = testedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(81,207,102,0.1); border-radius:3px; color:#51cf66;">' + w.name + '</span>').join('');
+        testedEl.innerHTML = testedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(81,207,102,0.1); border-radius:3px; color:#51cf66;">' + w.word + '</span>').join('');
       }
 
       var untestedEl = document.getElementById('pr-untested-words');
       if (untestedEl) {
         untestedEl.innerHTML = untestedWords.length > 0
-          ? untestedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(255,107,107,0.1); border-radius:3px; color:#ff6b6b;">' + w.name + '</span>').join('')
+          ? untestedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(255,107,107,0.1); border-radius:3px; color:#ff6b6b;">' + w.word + '</span>').join('')
           : '<span style="color:#51cf66;">All done words have tests!</span>';
       }
 
