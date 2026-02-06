@@ -2972,6 +2972,28 @@ LDR   X19, [X9]</pre>
 
 <div id="arch-view" class="panel">
   <div id="canvas-container"></div>
+
+  <!-- Stats HUD Overlay -->
+  <div id="stats-hud" style="position:absolute; top:20px; left:20px; background:rgba(10,10,18,0.9); border:1px solid #2a2a3a; border-radius:6px; padding:12px 16px; font-family:'SF Mono',monospace; font-size:10px; z-index:50; pointer-events:none;">
+    <h4 style="margin:0 0 10px 0; color:#7ecfff; font-size:10px; letter-spacing:1.5px;">ARM64 PORT STATUS</h4>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <div style="display:flex; justify-content:space-between; gap:20px;"><span style="color:#666;">WORDS</span><span id="hud-words" style="color:#c0c0cc;">--/-- ported</span></div>
+      <div style="display:flex; justify-content:space-between; gap:20px;"><span style="color:#666;">TESTS</span><span id="hud-tests" style="color:#51cf66;">--/-- passing</span></div>
+      <div style="display:flex; justify-content:space-between; gap:20px;"><span style="color:#666;">PHASE</span><span id="hud-phase" style="color:#ffd700;">Phase 1 active</span></div>
+    </div>
+  </div>
+  <script>
+  // Update HUD from word data
+  function updateHUD() {
+    const words = window.WORD_DATA || [];
+    if (words.length === 0) return;
+    const done = words.filter(w => w.status === 'done').length;
+    document.getElementById('hud-words').textContent = `${done}/${words.length} ported`;
+  }
+  window.addEventListener('word-data-loaded', updateHUD);
+  if (window.WORD_DATA && window.WORD_DATA.length > 0) updateHUD();
+  </script>
+
   <!-- ============================================================ -->
   <!-- WORD EXPLORER PANEL — replaces/enhances #phase-detail        -->
   <!-- Drop inside <div id="arch-view"> replacing the old           -->
