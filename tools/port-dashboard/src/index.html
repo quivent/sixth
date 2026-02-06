@@ -741,6 +741,22 @@ console.log('[Utils] Utility functions loaded');
       <!-- Populated by JS -->
     </div>
   </div>
+
+  <!-- Test coverage breakdown -->
+  <div class="pr-two-col" style="margin-top: 24px;">
+    <div class="pr-section" style="border-color: rgba(81,207,102,0.3);">
+      <div class="pr-section-title" style="color:#51cf66;">Words With Tests (<span id="pr-tested-count">--</span>)</div>
+      <div class="pr-word-list" id="pr-tested-words" style="max-height:200px; overflow-y:auto; font-size:11px; color:#888;">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+    <div class="pr-section" style="border-color: rgba(255,107,107,0.3);">
+      <div class="pr-section-title" style="color:#ff6b6b;">Words Without Tests (<span id="pr-untested-count">--</span>)</div>
+      <div class="pr-word-list" id="pr-untested-words" style="max-height:200px; overflow-y:auto; font-size:11px; color:#888;">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -861,7 +877,27 @@ console.log('[Utils] Utility functions loaded');
           if (missingEl) missingEl.innerHTML = missing.map(w => '<span class="pr-missing-word">' + w + '</span>').join('');
         }
       }
-      console.log('[Progress] Done');
+
+      // Test coverage lists
+      const testedWords = words.filter(w => w.has_test).sort((a,b) => a.name.localeCompare(b.name));
+      const untestedWords = words.filter(w => !w.has_test && w.status === 'done').sort((a,b) => a.name.localeCompare(b.name));
+
+      document.getElementById('pr-tested-count').textContent = testedWords.length;
+      document.getElementById('pr-untested-count').textContent = untestedWords.length;
+
+      var testedEl = document.getElementById('pr-tested-words');
+      if (testedEl) {
+        testedEl.innerHTML = testedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(81,207,102,0.1); border-radius:3px; color:#51cf66;">' + w.name + '</span>').join('');
+      }
+
+      var untestedEl = document.getElementById('pr-untested-words');
+      if (untestedEl) {
+        untestedEl.innerHTML = untestedWords.length > 0
+          ? untestedWords.map(w => '<span style="display:inline-block; padding:2px 6px; margin:2px; background:rgba(255,107,107,0.1); border-radius:3px; color:#ff6b6b;">' + w.name + '</span>').join('')
+          : '<span style="color:#51cf66;">All done words have tests!</span>';
+      }
+
+      console.log('[Progress] Done - tested:', testedWords.length, 'untested:', untestedWords.length);
     }).catch(err => {
       console.error('[Progress] Error:', err);
       timestamp.textContent = 'Error: ' + err;
