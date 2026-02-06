@@ -366,6 +366,55 @@ body {
         <div class="pm-bar-chart" id="pmBarChart"></div>
       </div>
     </div>
+    <!-- File-by-file status table -->
+    <h2 style="font-size:11px; color:#7ecfff; letter-spacing:2px; margin:24px 0 12px 0;">FILE-BY-FILE STATUS</h2>
+    <table class="file-progress-table" style="width:100%; border-collapse:collapse; font-size:11px;">
+      <thead>
+        <tr style="border-bottom:1px solid #2a2a3a;">
+          <th style="text-align:left; padding:8px; color:#888;">File</th>
+          <th style="text-align:right; padding:8px; color:#888;">x86</th>
+          <th style="text-align:right; padding:8px; color:#888;">ARM64</th>
+          <th style="text-align:right; padding:8px; color:#888;">Words</th>
+          <th style="text-align:left; padding:8px; color:#888;">Progress</th>
+        </tr>
+      </thead>
+      <tbody id="file-status-tbody">
+        <tr><td colspan="5" style="padding:12px; text-align:center; color:#666">Loading file inventory...</td></tr>
+      </tbody>
+    </table>
+    <script>
+    (function() {
+      if (typeof window.__TAURI__ === 'undefined') return;
+      window.__TAURI__.core.invoke('get_file_inventory').then(function(files) {
+        var tbody = document.getElementById('file-status-tbody');
+        if (!tbody || !files) return;
+        tbody.innerHTML = '';
+        var arm64Files = files.filter(f => f.category === 'arch-arm64');
+        arm64Files.sort((a, b) => a.phase - b.phase);
+        arm64Files.forEach(function(f) {
+          var pct = f.x86_lines > 0 ? Math.min(100, (f.lines / f.x86_lines) * 100) : 0;
+          var color = pct >= 80 ? '#4caf50' : (pct > 20 ? '#ff9800' : '#666');
+          var tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid #111';
+          tr.innerHTML = `
+            <td style="padding:6px 8px; color:${f.lines > 100 ? '#4caf50' : '#888'}">${f.name.replace('arch/arm64/', '')}</td>
+            <td style="padding:6px 8px; text-align:right; color:#666">${f.x86_lines || '-'}</td>
+            <td style="padding:6px 8px; text-align:right; color:${color}">${f.lines}</td>
+            <td style="padding:6px 8px; text-align:right; color:#888">${f.word_defs}</td>
+            <td style="padding:6px 8px">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="width:80px; height:4px; background:#1a1a2a; border-radius:2px; overflow:hidden;">
+                  <div style="width:${pct}%; height:100%; background:${color}; border-radius:2px;"></div>
+                </div>
+                <span style="color:${color}; font-size:10px;">${pct.toFixed(0)}%</span>
+              </div>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+        console.log('[PM] File table populated with', files.length, 'files');
+      }).catch(e => console.error('[PM] Failed to populate file table:', e));
+    })();
+    </script>
   </div>
   <script>
   // Status colors
