@@ -6296,6 +6296,27 @@ async function viewTestFile(name) {
   }
 }
 
+function showTestToast(msg, isPass) {
+  // Remove existing toast
+  const existing = document.getElementById('test-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'test-toast';
+  toast.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    padding: 12px 20px; border-radius: 6px;
+    font-family: 'SF Mono', monospace; font-size: 12px;
+    background: ${isPass ? 'rgba(81,207,102,0.95)' : 'rgba(255,107,107,0.95)'};
+    color: #000; font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    animation: slideIn 0.2s ease;
+  `;
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
 async function runSingleTest(name) {
   if (!window.__TAURI__) {
     alert('Running tests requires the Tauri desktop app.');
@@ -6320,33 +6341,23 @@ async function runSingleTest(name) {
     // Update the test status in UI
     if (testEl) {
       const statusEl = testEl.querySelector('.ts-test-status');
-      const iconEl = testEl.querySelector('.ts-test-head svg, .ts-test-head span:first-child');
-
-      if (statusEl) statusEl.textContent = result.status;
-
-      // Update icon based on status
-      const statusIcon = {
-        'Pass': '✓',
-        'Wrong': '✗',
-        'Cfail': '⚠',
-        'Rfail': '✗',
-      }[result.status] || '?';
-
-      const statusColor = {
-        'Pass': '#4a9',
-        'Wrong': '#e55',
-        'Cfail': '#fa0',
-        'Rfail': '#e55',
-      }[result.status] || '#888';
+      if (statusEl) {
+        // Show status + timing
+        const timing = result.compile_ms > 0 ? ` (${result.compile_ms}ms)` : '';
+        statusEl.textContent = result.status + timing;
+      }
 
       // Flash the result
       testEl.style.transition = 'background 0.3s';
-      testEl.style.background = result.status === 'Pass' ? 'rgba(68,170,153,0.2)' : 'rgba(238,85,85,0.2)';
-      setTimeout(() => { testEl.style.background = ''; }, 1000);
+      testEl.style.background = result.status === 'PASS' ? 'rgba(68,170,153,0.3)' : 'rgba(238,85,85,0.3)';
+      setTimeout(() => { testEl.style.background = ''; }, 2000);
     }
 
-    // Show brief notification
-    const msg = result.status === 'Pass' ? `✓ ${name} passed` : `✗ ${name}: ${result.status}`;
+    // Show toast notification
+    const msg = result.status === 'PASS'
+      ? `✓ ${name} passed in ${result.compile_ms}ms`
+      : `✗ ${name}: ${result.status}`;
+    showTestToast(msg, result.status === 'PASS');
     console.log('[test]', msg);
 
   } catch (err) {
@@ -10348,6 +10359,70 @@ document.querySelectorAll('.tab').forEach(tab => {
 </div>
 
 </div>
+
+<script>
+// Benchmark functions - defined but not auto-run on load
+let benchmarkResults = [];
+let benchmarkRunning = false;
+
+async function runBenchmarks() {
+  if (benchmarkRunning) return;
+  if (!window.__TAURI__) {
+    alert('Benchmarks require Tauri backend');
+    return;
+  }
+  benchmarkRunning = true;
+  const btn = document.getElementById('bench-run-all');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  try {
+    const summary = await window.__TAURI__.core.invoke('run_benchmarks');
+    benchmarkResults = summary.results || [];
+    renderBenchmarkResults(summary);
+  } catch (e) {
+    console.error('Benchmark error:', e);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Run All Benchmarks';
+  benchmarkRunning = false;
+}
+
+function formatTimeUs(us) {
+  if (!us || us === 0) return '--';
+  if (us < 1000) return us + 'µs';
+  if (us < 1000000) return (us / 1000).toFixed(1) + 'ms';
+  return (us / 1000000).toFixed(2) + 's';
+}
+
+function formatRatio(ratio) {
+  if (!ratio || ratio === 0) return '--';
+  return ratio.toFixed(2) + 'x';
+}
+
+function ratioClass(ratio) {
+  if (ratio <= 0.9) return 'good';
+  if (ratio >= 1.1) return 'bad';
+  return 'neutral';
+}
+
+function renderBenchmarkResults(summary) {
+  const tbody = document.getElementById('bench-results-body');
+  if (!tbody) return;
+  let html = '';
+  for (const r of (summary.results || [])) {
+    html += '<tr><td>' + r.name + '</td><td>' + formatTimeUs(r.sixth_run?.median_us) + '</td></tr>';
+  }
+  tbody.innerHTML = html || '<tr><td colspan="11">No results</td></tr>';
+}
+
+// Wire up button click - no auto-invoke on load
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('bench-run-all');
+  if (btn) {
+    btn.addEventListener('click', runBenchmarks);
+  }
+});
+</script>
 
 <!-- ============================================================ -->
 
