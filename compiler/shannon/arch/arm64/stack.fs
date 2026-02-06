@@ -42,10 +42,28 @@
 \ PROLOGUE / EPILOGUE
 \ ============================================================
 
-\ Entry: set up data stack pointer and return stack pointer below SP
+\ Entry: set up data stack pointer, return stack pointer, and variable base
 : gen-prologue ( -- )
   22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack)
-  28 31 3072 arm-sub-imm emit32 ;   \ SUB X28, SP, #3072 (return stack)
+  28 31 3072 arm-sub-imm emit32     \ SUB X28, SP, #3072 (return stack)
+  20 31 4080 arm-sub-imm emit32 ;   \ SUB X20, SP, #4080 (variable base, ~1KB)
+
+\ Emit variable address: push X20+offset to TOS
+: emit-var-addr ( offset -- )
+  push-tos                          \ save current TOS
+  dup 0= if
+    drop
+    19 20 arm-mov-reg emit32        \ MOV X19, X20 (offset 0)
+  else
+    dup $1000 < if
+      19 20 rot arm-add-imm emit32  \ ADD X19, X20, #offset (fits in imm12)
+    else
+      \ Large offset: load into X9 then add
+      dup $FFFF and 9 swap 0 arm-movz emit32   \ MOVZ X9, #lo
+      16 rshift $FFFF and ?dup if 9 swap 16 arm-movk emit32 then  \ MOVK X9, #hi
+      19 20 9 arm-add-reg emit32               \ ADD X19, X20, X9
+    then
+  then ;
 
 \ Exit: TOS → exit code, terminate via SVC
 : gen-epilogue ( -- )

@@ -247,6 +247,37 @@ variable const-count  0 const-count !
   2drop false ;
 
 \ ============================================================
+\ VARIABLES (stack-based: X20 + offset)
+\ ============================================================
+\ Each entry: 16 bytes name (padded), 8 bytes offset from X20 base
+24 constant VAR-ENTRY-SIZE
+create var-buf 128 VAR-ENTRY-SIZE * allot
+variable var-count  0 var-count !
+variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligned)
+
+: var-entry ( n -- addr ) VAR-ENTRY-SIZE * var-buf + ;
+
+: var-add ( addr u -- )
+  \ Add variable to table, allocate 8 bytes in DATA segment
+  var-count @ var-entry    \ get entry address
+  dup 16 0 fill            \ clear name area
+  >r
+  r@ swap 16 min move      \ copy name (max 16 chars)
+  var-next @ r@ 16 + !     \ store current offset at offset 16
+  r> drop
+  8 var-next +!            \ advance next offset by 8 (cell size)
+  1 var-count +! ;
+
+: var-find ( addr u -- offset true | false )
+  \ Look up variable, return offset from X20 base if found
+  var-count @ 0 ?do
+    2dup i var-entry dict-name= if
+      2drop i var-entry 16 + @ true unloop exit
+    then
+  loop
+  2drop false ;
+
+\ ============================================================
 \ DISPATCH TABLE
 \ ============================================================
 
@@ -363,6 +394,10 @@ variable const-count  0 const-count !
   2dup const-find if
     nip nip emit-lit exit
   then
+  \ Check variables - emit stack-relative address (X20 + offset)
+  2dup var-find if
+    nip nip emit-var-addr exit
+  then
   \ Check dictionary for word call
   2dup dict-find if
     nip nip gen-call exit
@@ -416,6 +451,12 @@ variable const-count  0 const-count !
   then
   -rot const-add ;               \ ( value name-addr name-u -- )
 
+: compile-variable ( -- )
+  \ Syntax: variable <name>
+  get-token                      \ get name
+  dup 0= if 2drop ." Missing variable name" cr 1 throw then
+  var-add ;                      \ add to var-buf, allocate 8 bytes in DATA segment
+
 : compile-source ( addr u -- )
   \ Copy source to input buffer
   dup input-len !
@@ -432,7 +473,11 @@ variable const-count  0 const-count !
       2dup s" constant" str= if
         2drop compile-constant
       else
-        2drop   \ skip unknown top-level tokens for now
+        2dup s" variable" str= if
+          2drop compile-variable
+        else
+          2drop   \ skip unknown top-level tokens for now
+        then
       then
     then
   again ;
