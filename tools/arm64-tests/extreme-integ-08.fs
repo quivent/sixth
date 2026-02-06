@@ -2,22 +2,22 @@
 \ Test: begin-while-repeat with variables and return stack
 \ Loop termination with side effects everywhere
 
-variable count
+variable cnt
 variable sum
 variable limit
 
 : accum-loop ( -- )
   begin
-    count @ limit @ <
+    cnt @ limit @ <
   while
-    count @ >r
+    cnt @ >r
     r@ sum +!
-    r> 1+ count !
+    r> 1+ cnt !
   repeat ;
 
 : outer-loop ( -- )
   3 0 do
-    0 count !
+    0 cnt !
     i 3 + limit !
     accum-loop
   loop ;

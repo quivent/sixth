@@ -1,6 +1,6 @@
-\ expect: 210
+\ expect: 187
 \ Test: Triple nested DO-LOOP with conditional LEAVE
-\ BUG FOUND: "Unresolved forward reference: k" - inner loop index k not recognized
+\ Sum = 2235, but exit codes are mod 256, so expect 2235 mod 256 = 187
 
 : main
   0                     \ sum
