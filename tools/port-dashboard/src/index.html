@@ -301,6 +301,11 @@ body {
         <div class="pm-stat-value" id="pm-pending">--</div>
         <div class="pm-stat-sub" id="pm-pending-sub">to port</div>
       </div>
+      <div class="pm-stat-card">
+        <div class="pm-stat-label">Eliminated</div>
+        <div class="pm-stat-value" id="pm-elim" style="color:#666;">--</div>
+        <div class="pm-stat-sub" id="pm-elim-sub">not needed</div>
+      </div>
     </div>
   </div>
   <script>
@@ -309,11 +314,12 @@ body {
     const words = window.WORD_DATA || [];
     if (words.length === 0) return;
 
-    let done = 0, pending = 0, redesign = 0;
+    let done = 0, pending = 0, redesign = 0, eliminated = 0;
     words.forEach(w => {
       if (w.status === 'done') done++;
       else if (w.status === 'pending') pending++;
       else if (w.status === 'redesign') redesign++;
+      else if (w.status === 'eliminated') eliminated++;
     });
 
     document.getElementById('pm-words-done').textContent = done;
@@ -321,6 +327,7 @@ body {
     document.getElementById('pm-words-bar').style.width = `${done/words.length*100}%`;
     document.getElementById('pm-pending').textContent = pending + redesign;
     document.getElementById('pm-pending-sub').textContent = `${pending} pending, ${redesign} redesign`;
+    document.getElementById('pm-elim').textContent = eliminated;
   }
 
   // Listen for word data updates
@@ -10510,11 +10517,30 @@ function renderBenchmarkResults(summary) {
   tbody.innerHTML = html || '<tr><td colspan="11">No results</td></tr>';
 }
 
-// Wire up button click - no auto-invoke on load
-document.addEventListener('DOMContentLoaded', () => {
+// Wire up button click and auto-load benchmark list
+document.addEventListener('DOMContentLoaded', async () => {
   const btn = document.getElementById('bench-run-all');
   if (btn) {
     btn.addEventListener('click', runBenchmarks);
+  }
+
+  // Auto-load benchmark list (not run them)
+  if (window.__TAURI__) {
+    try {
+      console.log('[Benchmarks] Loading benchmark list...');
+      const benchmarks = await window.__TAURI__.core.invoke('get_benchmarks');
+      console.log('[Benchmarks] Got', benchmarks?.length, 'benchmarks');
+      const tbody = document.getElementById('bench-results-body');
+      if (tbody && benchmarks && benchmarks.length > 0) {
+        let html = '';
+        for (const b of benchmarks) {
+          html += `<tr><td>${b.name}</td><td>${b.description}</td><td>--</td></tr>`;
+        }
+        tbody.innerHTML = html;
+      }
+    } catch (e) {
+      console.error('[Benchmarks] Failed to load list:', e);
+    }
   }
 });
 </script>
