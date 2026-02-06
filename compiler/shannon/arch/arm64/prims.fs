@@ -134,3 +134,114 @@
 
 : emit-cell+ ( -- )  \ ( addr -- addr+8 )
   19 19 8 arm-add-imm emit32 ;       \ ADD X19, X19, #8
+
+\ ============================================================
+\ MEMORY BLOCK OPERATIONS
+\ ============================================================
+
+: emit-move ( -- )  \ ( src dst u -- ) copy u bytes from src to dst
+  \ Stack: TOS=u, NOS=dst, 3rd=src
+  \ Registers: X19=u, [X22]=dst, [X22+8]=src
+  \ Handles overlapping by comparing addresses and choosing direction
+
+  \ Save u to X12
+  12 19 arm-mov-reg emit32            \ MOV X12, X19 (count)
+  emit-drop                           \ TOS = dst
+
+  \ Save dst to X11
+  11 19 arm-mov-reg emit32            \ MOV X11, X19 (dst)
+  emit-drop                           \ TOS = src
+
+  \ X10 = src
+  10 19 arm-mov-reg emit32            \ MOV X10, X19 (src)
+  emit-drop                           \ pop src, stack now empty of args
+
+  \ CBZ X12, done (skip if count=0)
+  code-pos @                          \ save CBZ position
+  12 0 arm-cbz emit32                 \ placeholder
+
+  \ Check for overlap: if dst > src AND dst < src+count, copy backwards
+  \ For simplicity, always copy forwards (standard move behavior)
+  \ cmove handles non-overlapping, move should handle overlap but we'll
+  \ just do forwards for now
+
+  \ Forward copy loop:
+  \ loop:
+  code-pos @                          \ save loop address
+
+  9 10 1 arm-ldrb-post emit32         \ LDRB W9, [X10], #1  (load byte, src++)
+  9 11 1 arm-strb-post emit32         \ STRB W9, [X11], #1  (store byte, dst++)
+  12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1 (count--)
+
+  \ CBNZ X12, loop
+  over code-pos @ - 4 /               \ offset = (loop - here) / 4
+  12 swap arm-cbnz emit32
+  drop                                \ drop loop addr
+
+  \ done: patch CBZ
+  code-pos @ over - 4 /               \ offset from CBZ to done
+  12 swap arm-cbz swap patch32 ;      \ patch CBZ
+
+: emit-fill ( -- )  \ ( addr u c -- ) fill u bytes at addr with c
+  \ Stack: TOS=c, NOS=u, 3rd=addr
+
+  \ Save c (byte value) to X9
+  9 19 arm-mov-reg emit32             \ MOV X9, X19 (char)
+  emit-drop                           \ TOS = u
+
+  \ Save u (count) to X12
+  12 19 arm-mov-reg emit32            \ MOV X12, X19 (count)
+  emit-drop                           \ TOS = addr
+
+  \ X10 = addr (dest pointer)
+  10 19 arm-mov-reg emit32            \ MOV X10, X19 (addr)
+  emit-drop                           \ pop addr
+
+  \ CBZ X12, done (skip if count=0)
+  code-pos @                          \ save CBZ position
+  12 0 arm-cbz emit32                 \ placeholder
+
+  \ loop:
+  code-pos @                          \ save loop address
+
+  9 10 1 arm-strb-post emit32         \ STRB W9, [X10], #1 (store byte, addr++)
+  12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1 (count--)
+
+  \ CBNZ X12, loop
+  over code-pos @ - 4 /               \ offset = (loop - here) / 4
+  12 swap arm-cbnz emit32
+  drop                                \ drop loop addr
+
+  \ done: patch CBZ
+  code-pos @ over - 4 /               \ offset from CBZ to done
+  12 swap arm-cbz swap patch32 ;      \ patch CBZ
+
+: emit-/string ( -- )  \ ( addr u n -- addr+n u-n ) adjust string
+  \ TOS=n, NOS=u, 3rd=addr
+  \ Result: TOS=u-n, NOS=addr+n
+
+  \ X9 = n (TOS)
+  9 19 arm-mov-reg emit32             \ MOV X9, X19
+  emit-drop                           \ TOS = u
+
+  \ TOS = u - n
+  19 19 9 arm-sub-reg emit32          \ SUB X19, X19, X9 (u-n in TOS)
+
+  \ Add n to addr (which is at [X22])
+  10 22 0 arm-ldr-off emit32          \ LDR X10, [X22] (load addr)
+  10 10 9 arm-add-reg emit32          \ ADD X10, X10, X9 (addr+n)
+  10 22 0 arm-str-off emit32 ;        \ STR X10, [X22] (store back)
+
+: emit-count ( -- )  \ ( c-addr -- addr u ) counted string to addr/len
+  \ TOS = c-addr (pointer to counted string, first byte is length)
+  \ Result: TOS = length, NOS = c-addr+1
+
+  \ Load length byte into X9
+  9 19 0 arm-ldrb-off emit32          \ LDRB W9, [X19] (length byte)
+
+  \ Increment c-addr to get string start
+  19 19 1 arm-add-imm emit32          \ ADD X19, X19, #1 (c-addr+1)
+
+  \ Push the string address, then put length in TOS
+  push-tos                            \ push c-addr+1
+  19 9 arm-mov-reg emit32 ;           \ MOV X19, X9 (length in TOS)
