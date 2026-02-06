@@ -265,8 +265,41 @@ body {
   <div class="tab" data-panel="bench-view">Benchmarks</div>
 </div>
 <div id="metrics-view" class="panel active">
-  <h1 style="color:#ffd700;">Dashboard Working</h1>
-  <p>If you see this, the basic structure works.</p>
+  <div class="north-star-box">
+    <h2>&#9733; NORTH STAR</h2>
+    <p>Shannon compiles Shannon on ARM64 macOS. The C engine becomes optional scaffolding.
+       <br>Every step below serves that goal. Nothing else matters.</p>
+    <div class="principle">ONE FILE AT A TIME. ONE TEST AT A TIME. NEVER TWO UNKNOWNS.</div>
+  </div>
+  <style>
+    .port-metrics { font-family: 'SF Mono', monospace; color: #c0c0cc; background: #08080d; padding: 20px; max-width: 1100px; }
+    .pm-section-header { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ecfff; margin-bottom: 12px; font-weight: 600; }
+    .pm-metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+    .pm-stat-card { background: rgba(10,10,18,0.95); border: 1px solid #1a1a2a; border-radius: 6px; padding: 14px 16px; }
+    .pm-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ecfff; font-weight: 600; }
+    .pm-stat-value { font-size: 22px; font-weight: 700; color: #e0e0ee; }
+    .pm-stat-sub { font-size: 10px; color: #888; }
+  </style>
+  <div class="port-metrics">
+    <div class="pm-section-header">Port Progress</div>
+    <div class="pm-metrics-row">
+      <div class="pm-stat-card">
+        <div class="pm-stat-label">Words Ported</div>
+        <div class="pm-stat-value">--</div>
+        <div class="pm-stat-sub">loading...</div>
+      </div>
+      <div class="pm-stat-card">
+        <div class="pm-stat-label">Tests Passing</div>
+        <div class="pm-stat-value">--</div>
+        <div class="pm-stat-sub">loading...</div>
+      </div>
+      <div class="pm-stat-card">
+        <div class="pm-stat-label">Files Complete</div>
+        <div class="pm-stat-value">--</div>
+        <div class="pm-stat-sub">loading...</div>
+      </div>
+    </div>
+  </div>
 </div>
 <div id="hw-view" class="panel">
 
