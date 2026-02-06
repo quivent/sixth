@@ -336,6 +336,7 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2dup s" fill" str= if 2drop emit-fill true exit then
   2dup s" /string" str= if 2drop emit-/string true exit then
   2dup s" count" str= if 2drop emit-count true exit then
+  2dup s" slurp-file" str= if 2drop emit-slurp-file true exit then
   2drop false ;
 
 : try-compare ( addr u -- handled? )

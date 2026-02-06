@@ -369,3 +369,99 @@
   push-tos                           \ make room for u2
   0 22 0 arm-str-off emit32          \ [X22] = X0 (u2)
   19 0 0 arm-movz emit32 ;           \ X19 = 0 (ior)
+
+: emit-slurp-file ( -- )  \ ( c-addr u -- addr2 u2 ior )
+  \ Read entire file into SLURP-BUF. Returns buffer addr, bytes read, ior.
+  \ On error returns (0 0 -1)
+
+  \ === Step 1: Copy path to PATH-BUF and null-terminate ===
+  \ Save len to X12
+  12 19 arm-mov-reg emit32            \ MOV X12, X19 (len)
+  emit-drop                           \ TOS = c-addr (source)
+
+  \ X9 = dest start = X20 + PATH-BUF-OFFSET
+  9 20 PATH-BUF-OFFSET arm-add-imm emit32
+
+  \ X13 = copy dest pointer (starts at X9)
+  13 9 arm-mov-reg emit32             \ MOV X13, X9
+
+  \ CBZ X12, copy-done (skip copy if len=0)
+  code-pos @                          \ save CBZ position for patching
+  12 0 arm-cbz emit32                 \ placeholder
+
+  \ Copy loop
+  code-pos @                          \ save loop-body address
+  10 19 1 arm-ldrb-post emit32        \ LDRB W10, [X19], #1
+  10 13 1 arm-strb-post emit32        \ STRB W10, [X13], #1
+  12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1
+  over code-pos @ - 4 /               \ offset = (loop - here) / 4
+  12 swap arm-cbnz emit32
+  drop                                \ drop loop addr
+
+  \ copy-done: patch the CBZ
+  code-pos @ over - 4 /
+  12 swap arm-cbz swap patch32
+
+  \ Store null terminator
+  10 0 0 arm-movz emit32              \ MOV X10, #0
+  10 13 0 arm-strb-off emit32         \ STRB W10, [X13]
+
+  emit-drop                           \ pop c-addr from stack
+
+  \ === Step 2: Open file (O_RDONLY=0) ===
+  0 9 arm-mov-reg emit32              \ MOV X0, X9 (path buffer)
+  1 0 0 arm-movz emit32               \ MOV X1, #0 (O_RDONLY)
+  2 0 0 arm-movz emit32               \ MOV X2, #0 (mode, unused for read)
+  16 5 0 arm-movz emit32              \ MOV X16, #5 (open)
+  $80 arm-svc emit32                  \ SVC #0x80
+
+  \ Check for error (carry set)
+  code-pos @                          \ save B.CS position
+  2 0 arm-bcond emit32                \ B.CS error (placeholder)
+
+  \ === Step 3: Read into SLURP-BUF ===
+  \ Save fd to X14
+  14 0 arm-mov-reg emit32             \ MOV X14, X0 (fd)
+
+  \ read(fd, SLURP-BUF, SLURP-BUF-SIZE)
+  0 14 arm-mov-reg emit32             \ MOV X0, X14 (fd)
+  1 20 SLURP-BUF-OFFSET arm-add-imm emit32  \ ADD X1, X20, #SLURP-BUF-OFFSET
+  \ Load SLURP-BUF-SIZE (262144 = 0x40000) into X2
+  2 0 0 arm-movz emit32               \ MOV X2, #0
+  2 4 16 arm-movk emit32              \ MOVK X2, #4, LSL #16 (X2 = 0x40000)
+  16 3 0 arm-movz emit32              \ MOV X16, #3 (read)
+  $80 arm-svc emit32                  \ SVC #0x80
+
+  \ Save bytes read to X15
+  15 0 arm-mov-reg emit32             \ MOV X15, X0 (bytes read)
+
+  \ === Step 4: Close file ===
+  0 14 arm-mov-reg emit32             \ MOV X0, X14 (fd)
+  16 6 0 arm-movz emit32              \ MOV X16, #6 (close)
+  $80 arm-svc emit32                  \ SVC #0x80
+
+  \ === Step 5: Return success (addr2 u2 0) ===
+  push-tos                            \ make room
+  9 20 SLURP-BUF-OFFSET arm-add-imm emit32  \ ADD X9, X20, #SLURP-BUF-OFFSET
+  9 22 0 arm-str-off emit32           \ [X22] = addr2
+  push-tos                            \ make room
+  15 22 0 arm-str-off emit32          \ [X22] = u2 (bytes read)
+  19 0 0 arm-movz emit32              \ X19 = 0 (ior = success)
+  code-pos @                          \ save B position
+  0 arm-b emit32                      \ B skip-error (placeholder)
+
+  \ === Error path: return (0 0 -1) ===
+  swap code-pos @ over - 4 /          \ compute B.CS offset
+  2 swap arm-bcond swap patch32       \ patch B.CS
+
+  push-tos                            \ make room
+  19 0 0 arm-movz emit32              \ MOV X19, #0
+  19 22 0 arm-str-off emit32          \ [X22] = 0 (addr2)
+  push-tos                            \ make room
+  19 22 0 arm-str-off emit32          \ [X22] = 0 (u2)
+  19 0 0 arm-movz emit32              \ MOV X19, #0
+  19 19 arm-mvn emit32                \ MVN X19, X19 (X19 = -1)
+
+  \ Patch the success path's B to skip error
+  code-pos @ over - 4 /
+  arm-b swap patch32 ;
