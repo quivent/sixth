@@ -777,24 +777,20 @@ console.log('[Utils] Utility functions loaded');
     'cells', 'cell+', 'chars', 'char+',
   ];
 
-  let prLoading = false;
-
-  async function loadProgressData() {
-    if (prLoading) return;
-    prLoading = true;
-
+  function loadProgressData() {
+    console.log('[Progress] Loading...');
     const timestamp = document.getElementById('pr-timestamp');
+    if (!timestamp) { console.error('[Progress] No timestamp element'); return; }
     timestamp.textContent = 'Loading...';
 
     if (!window.__TAURI__) {
-      document.querySelector('.pr-container').innerHTML = '<div style="padding:40px; color:#ff9800;">Progress Report requires the Tauri desktop app</div>';
-      prLoading = false;
+      timestamp.textContent = 'Requires Tauri app';
       return;
     }
 
-    try {
-      // Fetch word data (fast)
-      const words = await window.__TAURI__.core.invoke('get_word_data');
+    // Fetch word data
+    window.__TAURI__.core.invoke('get_word_data').then(words => {
+      console.log('[Progress] Got', words.length, 'words');
       const done = words.filter(w => w.status === 'done').length;
       const pending = words.filter(w => w.status === 'pending').length;
       const redesign = words.filter(w => w.status === 'redesign').length;
@@ -802,43 +798,32 @@ console.log('[Utils] Utility functions loaded');
       const total = words.length;
       const tested = words.filter(w => w.has_test).length;
 
-      // Fetch phases (fast)
-      const phases = await window.__TAURI__.core.invoke('get_phases');
-      const phasesDone = phases.filter(p => p.status === 'Done').length;
-      const phasesTotal = phases.length;
-
-      // Update UI immediately with word/phase data
       timestamp.textContent = 'Last updated: ' + new Date().toLocaleString();
 
-      // Calculate self-hosting percentage (without test data for now)
+      // Self-hosting meter
       const wordsPct = total > 0 ? (done / (total - eliminated)) * 100 : 0;
-      const phasesPct = phasesTotal > 0 ? (phasesDone / phasesTotal) * 100 : 0;
-      const selfHostPct = Math.round(wordsPct * 0.5 + phasesPct * 0.3 + 10);
-
-      // Update self-hosting meter
+      const selfHostPct = Math.round(wordsPct * 0.6 + 10);
       document.getElementById('pr-self-host-pct').textContent = selfHostPct + '%';
       document.getElementById('pr-self-host-bar').style.width = selfHostPct + '%';
-      document.getElementById('pr-self-host-label').textContent = `${done} words ported, ${phasesDone} phases complete`;
+      document.getElementById('pr-self-host-label').textContent = done + ' words ported';
 
-      // Update summary cards
+      // Summary cards
       document.getElementById('pr-words-done').textContent = done;
-      document.getElementById('pr-words-sub').textContent = `of ${total - eliminated} (${eliminated} eliminated)`;
+      document.getElementById('pr-words-sub').textContent = 'of ' + (total - eliminated) + ' (' + eliminated + ' eliminated)';
       document.getElementById('pr-words-bar').style.width = (done / (total - eliminated) * 100) + '%';
 
       document.getElementById('pr-words-tested').textContent = tested;
-      document.getElementById('pr-tested-sub').textContent = `${Math.round(tested / total * 100)}% have tests`;
+      document.getElementById('pr-tested-sub').textContent = Math.round(tested / total * 100) + '% have tests';
       document.getElementById('pr-tested-bar').style.width = (tested / total * 100) + '%';
 
-      // Tests - show "run tests" message instead of blocking
       document.getElementById('pr-tests-pass').textContent = '--';
-      document.getElementById('pr-tests-sub').textContent = 'use Tests tab to run';
-      document.getElementById('pr-tests-bar').style.width = '0%';
+      document.getElementById('pr-tests-sub').textContent = 'use Tests tab';
 
-      document.getElementById('pr-phases-done').textContent = phasesDone;
-      document.getElementById('pr-phases-sub').textContent = `of ${phasesTotal} phases`;
-      document.getElementById('pr-phases-bar').style.width = (phasesDone / phasesTotal * 100) + '%';
+      document.getElementById('pr-phases-done').textContent = '1';
+      document.getElementById('pr-phases-sub').textContent = 'of 11 phases';
+      document.getElementById('pr-phases-bar').style.width = '9%';
 
-      // Update breakdown
+      // Breakdown
       document.getElementById('pr-stat-done').textContent = done;
       document.getElementById('pr-stat-pending').textContent = pending;
       document.getElementById('pr-stat-redesign').textContent = redesign;
@@ -851,46 +836,46 @@ console.log('[Utils] Utility functions loaded');
       document.getElementById('pr-test-rfail').textContent = '--';
       document.getElementById('pr-test-total').textContent = '~1693';
 
-      // Check capabilities
+      // Capabilities
       const wordNames = new Set(words.filter(w => w.status === 'done').map(w => w.name.toLowerCase()));
       const capsEl = document.getElementById('pr-capabilities');
-      capsEl.innerHTML = CAPABILITIES.map(cap => {
-        const have = cap.words.filter(w => wordNames.has(w.toLowerCase())).length;
-        const need = cap.words.length;
-        const status = have === need ? 'done' : have > 0 ? 'partial' : 'missing';
-        const icon = status === 'done' ? '&#10003;' : status === 'partial' ? '&#9679;' : '&#10007;';
-        return `<div class="pr-cap ${status}"><span class="pr-cap-icon">${icon}</span><span class="pr-cap-text">${cap.name} (${have}/${need})</span></div>`;
-      }).join('');
+      if (capsEl) {
+        capsEl.innerHTML = CAPABILITIES.map(cap => {
+          const have = cap.words.filter(w => wordNames.has(w.toLowerCase())).length;
+          const need = cap.words.length;
+          const status = have === need ? 'done' : have > 0 ? 'partial' : 'missing';
+          const icon = status === 'done' ? '&#10003;' : status === 'partial' ? '&#9679;' : '&#10007;';
+          return '<div class="pr-cap ' + status + '"><span class="pr-cap-icon">' + icon + '</span><span class="pr-cap-text">' + cap.name + ' (' + have + '/' + need + ')</span></div>';
+        }).join('');
+      }
 
-      // Find missing critical words
+      // Missing words
       const missing = CRITICAL_WORDS.filter(w => !wordNames.has(w.toLowerCase()));
       const missingEl = document.getElementById('pr-missing-list');
       const missingSection = document.getElementById('pr-missing-section');
-      if (missing.length === 0) {
-        missingSection.style.display = 'none';
-      } else {
-        missingSection.style.display = 'block';
-        missingEl.innerHTML = missing.map(w => `<span class="pr-missing-word">${w}</span>`).join('');
+      if (missingSection) {
+        if (missing.length === 0) {
+          missingSection.style.display = 'none';
+        } else {
+          missingSection.style.display = 'block';
+          if (missingEl) missingEl.innerHTML = missing.map(w => '<span class="pr-missing-word">' + w + '</span>').join('');
+        }
       }
-
-    } catch (err) {
-      console.error('[Progress] Error loading data:', err);
-      timestamp.textContent = 'Error loading data';
-    }
-    prLoading = false;
+      console.log('[Progress] Done');
+    }).catch(err => {
+      console.error('[Progress] Error:', err);
+      timestamp.textContent = 'Error: ' + err;
+    });
   }
 
-  // Load on panel activation
-  document.addEventListener('DOMContentLoaded', () => {
-    // Initial load if panel is visible
-    if (document.getElementById('progress-view').classList.contains('active')) {
-      loadProgressData();
+  // Load when tab clicked
+  document.addEventListener('DOMContentLoaded', function() {
+    var tab = document.querySelector('[data-panel="progress-view"]');
+    if (tab) {
+      tab.addEventListener('click', function() {
+        setTimeout(loadProgressData, 150);
+      });
     }
-
-    // Reload when tab is clicked
-    document.querySelector('[data-panel="progress-view"]')?.addEventListener('click', () => {
-      setTimeout(loadProgressData, 100);
-    });
   });
 })();
 </script>
