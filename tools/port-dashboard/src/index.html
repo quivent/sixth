@@ -279,6 +279,8 @@ body {
     .pm-stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ecfff; font-weight: 600; }
     .pm-stat-value { font-size: 22px; font-weight: 700; color: #e0e0ee; }
     .pm-stat-sub { font-size: 10px; color: #888; }
+    .pm-progress { height: 4px; background: #1a1a2a; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+    .pm-progress-fill { height: 100%; background: #51cf66; border-radius: 2px; transition: width 0.5s ease; }
   </style>
   <div class="port-metrics">
     <div class="pm-section-header">Port Progress</div>
@@ -287,6 +289,7 @@ body {
         <div class="pm-stat-label">Words Ported</div>
         <div class="pm-stat-value" id="pm-words-done">--</div>
         <div class="pm-stat-sub" id="pm-words-sub">loading...</div>
+        <div class="pm-progress"><div class="pm-progress-fill" id="pm-words-bar" style="width:0%"></div></div>
       </div>
       <div class="pm-stat-card">
         <div class="pm-stat-label">Tests Passing</div>
@@ -314,7 +317,8 @@ body {
     });
 
     document.getElementById('pm-words-done').textContent = done;
-    document.getElementById('pm-words-sub').textContent = `of ${words.length} total`;
+    document.getElementById('pm-words-sub').textContent = `of ${words.length} total (${Math.round(done/words.length*100)}%)`;
+    document.getElementById('pm-words-bar').style.width = `${done/words.length*100}%`;
     document.getElementById('pm-pending').textContent = pending + redesign;
     document.getElementById('pm-pending-sub').textContent = `${pending} pending, ${redesign} redesign`;
   }
