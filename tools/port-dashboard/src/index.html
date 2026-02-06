@@ -10708,6 +10708,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // Phase data
 const PHASES = [
@@ -10739,6 +10740,14 @@ if (!container) {
   renderer.setSize(container.clientWidth, container.clientHeight);
   container.appendChild(renderer.domElement);
 
+  // CSS2D renderer for labels
+  const labelRenderer = new CSS2DRenderer();
+  labelRenderer.setSize(container.clientWidth, container.clientHeight);
+  labelRenderer.domElement.style.position = 'absolute';
+  labelRenderer.domElement.style.top = '0';
+  labelRenderer.domElement.style.pointerEvents = 'none';
+  container.appendChild(labelRenderer.domElement);
+
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 10, 0);
   controls.enableDamping = true;
@@ -10748,6 +10757,17 @@ if (!container) {
   const dl = new THREE.DirectionalLight(0xffffff, 0.5);
   dl.position.set(5, 20, 10);
   scene.add(dl);
+
+  // Star background
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(500 * 3);
+  for (let i = 0; i < 500; i++) {
+    starPos[i*3] = (Math.random() - 0.5) * 100;
+    starPos[i*3+1] = (Math.random() - 0.5) * 100;
+    starPos[i*3+2] = (Math.random() - 0.5) * 100;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({size: 0.05, color: 0x444455})));
 
   // Status colors
   const colors = { done: 0x51cf66, active: 0xffd700, pending: 0x555566 };
@@ -10766,6 +10786,24 @@ if (!container) {
     mesh.userData = p;
     scene.add(mesh);
     nodes.push({ phase: p, mesh });
+
+    // Add label
+    const labelDiv = document.createElement('div');
+    labelDiv.style.cssText = `font-family:'SF Mono',monospace;font-size:10px;color:${p.id===10?'#ffd700':'#888'};background:rgba(8,8,13,0.8);padding:2px 6px;border-radius:3px;white-space:nowrap;`;
+    labelDiv.textContent = p.name;
+    const label = new CSS2DObject(labelDiv);
+    label.position.set(0, 0.7, 0);
+    mesh.add(label);
+
+    // North Star ring for final phase
+    if (p.id === 10) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.7, 0.85, 64),
+        new THREE.MeshBasicMaterial({color:0xffd700, transparent:true, opacity:0.3, side:THREE.DoubleSide})
+      );
+      ring.position.set(...p.pos);
+      scene.add(ring);
+    }
   });
 
   // Create connections
@@ -10787,6 +10825,7 @@ if (!container) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    labelRenderer.setSize(w, h);
   }
 
   function animate() {
@@ -10799,6 +10838,7 @@ if (!container) {
     });
     controls.update();
     renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
   }
   animate();
 
