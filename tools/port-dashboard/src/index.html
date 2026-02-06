@@ -6470,6 +6470,7 @@ LDR   X19, [X9]</pre>
 <div id="ts-phases"></div>
 
 <script>
+console.log('[Tests] Script block starting...');
 // ── Dynamic Test Data from Backend ──
 let TEST_CATEGORIES = [];
 let activeCategory = null;
@@ -6794,8 +6795,13 @@ async function runAllTests() {
 }
 
 // ── Init ──
-document.getElementById('ts-run-all-btn').addEventListener('click', runAllTests);
-document.getElementById('ts-refresh-btn').addEventListener('click', loadTests);
+console.log('[Tests] Setting up event listeners...');
+const runBtn = document.getElementById('ts-run-all-btn');
+const refreshBtn = document.getElementById('ts-refresh-btn');
+console.log('[Tests] Found buttons:', { runBtn: !!runBtn, refreshBtn: !!refreshBtn });
+if (runBtn) runBtn.addEventListener('click', runAllTests);
+if (refreshBtn) refreshBtn.addEventListener('click', loadTests);
+console.log('[Tests] Calling loadTests()...');
 loadTests();
 
 </script>

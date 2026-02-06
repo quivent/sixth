@@ -277,7 +277,11 @@ pub fn read_source_file(path: String, state: State<AppState>) -> Result<String, 
 /// Does NOT run tests - just discovers what exists.
 #[tauri::command]
 pub fn scan_all_tests(state: State<AppState>) -> Vec<TestCategoryGroup> {
-    runner::scan_all_tests(state.project_root())
+    let result = runner::scan_all_tests(state.project_root());
+    eprintln!("[scan_all_tests] Found {} categories with {} total tests",
+        result.len(),
+        result.iter().map(|g| g.tests.len()).sum::<usize>());
+    result
 }
 
 /// Run all tests and return results grouped by category.
