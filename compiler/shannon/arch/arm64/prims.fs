@@ -112,6 +112,16 @@
   19 12 arm-cset emit32              \ CSET X19, GT
   19 19 arm-neg emit32 ;             \ NEG X19, X19
 
+: emit-0>= ( -- )  \ ( x -- flag ) -1 if TOS >= 0
+  19 0 arm-cmp-imm emit32            \ CMP X19, #0
+  19 10 arm-cset emit32              \ CSET X19, GE
+  19 19 arm-neg emit32 ;             \ NEG X19, X19
+
+: emit-0<= ( -- )  \ ( x -- flag ) -1 if TOS <= 0
+  19 0 arm-cmp-imm emit32            \ CMP X19, #0
+  19 13 arm-cset emit32              \ CSET X19, LE
+  19 19 arm-neg emit32 ;             \ NEG X19, X19
+
 \ ============================================================
 \ CELL OPERATIONS
 \ ============================================================

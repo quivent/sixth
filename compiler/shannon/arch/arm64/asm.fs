@@ -122,6 +122,14 @@ variable code-pos   0 code-pos !
 : arm-strb-off ( rt rn imm12 -- insn )
   10 lshift swap 5 lshift or swap or $39000000 or ;
 
+\ LDRB Wt, [Xn], #imm9  (post-index, byte)
+: arm-ldrb-post ( rt rn imm9 -- insn )
+  $1FF and 12 lshift swap 5 lshift or swap or $38400400 or ;
+
+\ STRB Wt, [Xn], #imm9  (post-index, byte)
+: arm-strb-post ( rt rn imm9 -- insn )
+  $1FF and 12 lshift swap 5 lshift or swap or $38000400 or ;
+
 \ ============================================================
 \ COMPARE INSTRUCTIONS
 \ ============================================================
@@ -150,6 +158,14 @@ variable code-pos   0 code-pos !
 \ B unconditional branch (offset in instructions, signed 26-bit)
 : arm-b ( offset26 -- insn )
   $3FFFFFF and $14000000 or ;
+
+\ CBZ Xt, offset (compare and branch if zero, offset in instructions)
+: arm-cbz ( rt offset19 -- insn )
+  $7FFFF and 5 lshift swap or $B4000000 or ;
+
+\ CBNZ Xt, offset (compare and branch if not zero, offset in instructions)
+: arm-cbnz ( rt offset19 -- insn )
+  $7FFFF and 5 lshift swap or $B5000000 or ;
 
 \ BL branch with link (offset in instructions, signed 26-bit)
 : arm-bl ( offset26 -- insn )

@@ -328,6 +328,7 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2dup s" allot" str= if 2drop emit-allot true exit then
   2dup s" ," str= if 2drop emit-comma true exit then
   2dup s" c," str= if 2drop emit-c-comma true exit then
+  2dup s" open-file" str= if 2drop emit-open-file true exit then
   2dup s" close-file" str= if 2drop emit-close-file true exit then
   2dup s" write-file" str= if 2drop emit-write-file true exit then
   2dup s" read-file" str= if 2drop emit-read-file true exit then
@@ -346,6 +347,8 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2dup s" 0<>" str= if 2drop emit-0<> true exit then
   2dup s" 0<" str= if 2drop emit-0< true exit then
   2dup s" 0>" str= if 2drop emit-0> true exit then
+  2dup s" 0>=" str= if 2drop emit-0>= true exit then
+  2dup s" 0<=" str= if 2drop emit-0<= true exit then
   2drop false ;
 
 \ String literals

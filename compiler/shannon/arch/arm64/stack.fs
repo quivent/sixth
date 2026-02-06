@@ -255,6 +255,68 @@
 3328 constant SLURP-BUF-OFFSET
 262144 constant SLURP-BUF-SIZE
 
+\ Helper: store 32-bit value at code-buf + offset (for patching instructions)
+: patch32 ( u32 offset -- )
+  code-buf + >r
+  dup $FF and r@ c!
+  8 rshift dup $FF and r@ 1+ c!
+  8 rshift dup $FF and r@ 2 + c!
+  8 rshift $FF and r> 3 + c! ;
+
+: emit-open-file ( -- )  \ ( c-addr u fam -- fileid ior )
+  \ Copy path to null-terminated buffer, then open()
+  \ Save fam (flags) to X11
+  11 19 arm-mov-reg emit32            \ MOV X11, X19
+  emit-drop                           \ TOS = u
+  \ Save len to X12
+  12 19 arm-mov-reg emit32            \ MOV X12, X19
+  emit-drop                           \ TOS = c-addr (source)
+
+  \ X9 = dest start = X20 + PATH-BUF-OFFSET
+  9 20 PATH-BUF-OFFSET arm-add-imm emit32
+
+  \ X13 = copy dest pointer (starts at X9)
+  13 9 arm-mov-reg emit32             \ MOV X13, X9
+
+  \ CBZ X12, done (skip copy if len=0)
+  code-pos @                          \ save CBZ position for patching
+  12 0 arm-cbz emit32                 \ placeholder
+
+  \ loop body start
+  code-pos @                          \ save loop-body address
+
+  \ Copy one byte: LDRB from source, STRB to dest, both post-increment
+  10 19 1 arm-ldrb-post emit32        \ LDRB W10, [X19], #1
+  10 13 1 arm-strb-post emit32        \ STRB W10, [X13], #1
+  12 12 1 arm-sub-imm emit32          \ SUB X12, X12, #1
+
+  \ CBNZ X12, loop (continue if len > 0)
+  over code-pos @ - 4 /               \ offset = (loop - here) / 4 (negative)
+  12 swap arm-cbnz emit32
+  drop                                \ drop loop addr
+
+  \ done: patch the CBZ to jump here
+  code-pos @                          \ done address
+  over - 4 /                          \ offset from CBZ to done
+  12 swap arm-cbz                     \ regenerate CBZ with correct offset
+  swap patch32                        \ patch at saved position (32-bit write)
+
+  \ Store null terminator at end of copied string
+  10 0 0 arm-movz emit32              \ MOV X10, #0
+  10 13 0 arm-strb-off emit32         \ STRB W10, [X13]
+
+  \ open(path, flags, mode) - syscall #5
+  0 9 arm-mov-reg emit32              \ MOV X0, X9 (path buffer)
+  1 11 arm-mov-reg emit32             \ MOV X1, X11 (flags)
+  2 $1A4 0 arm-movz emit32            \ MOV X2, #0644 octal = 420
+  16 5 0 arm-movz emit32              \ MOV X16, #5 (open)
+  $80 arm-svc emit32                  \ SVC #0x80
+
+  \ Return (fileid ior): fileid in X0, ior=0 (caller checks fileid<0)
+  push-tos                            \ make room for fileid
+  0 22 0 arm-str-off emit32           \ [X22] = X0 (fileid)
+  19 0 0 arm-movz emit32 ;            \ X19 = 0 (ior)
+
 : emit-close-file ( -- )  \ ( fileid -- ior )
   \ close(fd) -> 0 on success, negative on error
   0 19 arm-mov-reg emit32            \ MOV X0, X19 (fd)
