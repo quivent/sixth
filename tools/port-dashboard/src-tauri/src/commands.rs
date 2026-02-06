@@ -554,9 +554,10 @@ pub fn run_benchmarks(state: State<AppState>) -> BenchmarkSummary {
     benchmark::run_all_benchmarks(state.project_root())
 }
 
-/// Run a single benchmark by name (efficient - only runs the specified benchmark)
+/// Run a single benchmark by name (quick mode - 3 iterations for responsiveness)
 #[tauri::command]
 pub fn run_benchmark(name: String, state: State<AppState>) -> Option<crate::models::BenchmarkResult> {
+    println!("[benchmark] Running single benchmark: {}", name);
     let definitions = benchmark::get_benchmark_definitions();
     let def = definitions.iter().find(|d| d.name == name)?;
 
@@ -572,5 +573,8 @@ pub fn run_benchmark(name: String, state: State<AppState>) -> Option<crate::mode
     let temp_dir = std::env::temp_dir().join("sixth-benchmarks");
     let _ = std::fs::create_dir_all(&temp_dir);
 
-    Some(benchmark::run_benchmark(state.project_root(), def, &temp_dir, &gcc_binaries, 10))
+    // Use 3 runs for quick single-benchmark testing (vs 10 for full suite)
+    let result = benchmark::run_benchmark(state.project_root(), def, &temp_dir, &gcc_binaries, 3);
+    println!("[benchmark] Done: {}", name);
+    Some(result)
 }

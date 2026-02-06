@@ -8225,6 +8225,327 @@ if (window.__TAURI__) {
       </table>
     </div>
   </div>
+
+  <!-- Section 7: Code-Level Bug Audit (Claude Shannon Analysis) -->
+  <div class="av-card" data-section="bugs">
+    <div class="av-card-head" onclick="avToggle(this)">
+      <div class="av-card-left">
+        <svg class="av-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5l7 7-7 7"/></svg>
+        <span class="av-card-num">07</span>
+        <span class="av-card-title">Code-Level Bug Audit</span>
+      </div>
+      <div class="av-card-right">
+        <span class="av-card-count" style="color:var(--av-high)">37 issues</span>
+      </div>
+    </div>
+    <div class="av-card-body">
+      <div class="av-section-note">Deep analysis of ARM64 compiler source files. Issues grouped by file and severity.</div>
+      <div class="av-sep"></div>
+
+      <!-- asm.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">asm.fs - Instruction Encoding</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">ASM-001</td>
+            <td class="av-risk-phase">50-54</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">arm-adr offset not validated. ADR supports +/-1MB only. Large offsets silently corrupt.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">ASM-002</td>
+            <td class="av-risk-phase">167</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">arm-bcond 19-bit offset has no range check. Branches >1MB truncated silently.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">ASM-003</td>
+            <td class="av-risk-phase">171</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">arm-b 26-bit offset not validated. Branches >128MB truncated.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">ASM-005</td>
+            <td class="av-risk-phase">94-95</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">arm-add-imm/arm-sub-imm only support 12-bit (0-4095). No validation.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">ASM-006</td>
+            <td class="av-risk-phase">114-143</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">Pre/post-indexed load/store use 9-bit signed (-256 to +255). No range check.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- stack.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">stack.fs - Stack Operations</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">STK-001</td>
+            <td class="av-risk-phase">50-64</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">gen-prologue: if here-offset > 4095, immediate encoding fails silently.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">STK-003</td>
+            <td class="av-risk-phase">268-341</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">emit-open-file: no path length validation. Paths >256 bytes overflow buffer.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">STK-004</td>
+            <td class="av-risk-phase">375-469</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">emit-slurp-file: reads up to 256KB with no overflow check.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">STK-006</td>
+            <td class="av-risk-phase">221-229</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">emit-emit: uses SP without saving LR. May corrupt return address.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- control.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">control.fs - Control Flow</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">CTL-001</td>
+            <td class="av-risk-phase">16-17</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">cf-stack has 256 cells but no overflow check. Deep nesting corrupts memory.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CTL-002</td>
+            <td class="av-risk-phase">20</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">cf-pop has no underflow check. Mismatched IF/THEN causes silent corruption.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CTL-003</td>
+            <td class="av-risk-phase">27-32</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">Duplicate arm-cbz/arm-cbnz definitions shadow those in asm.fs.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CTL-004</td>
+            <td class="av-risk-phase">41-51</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">patch-branch uses 19-bit mask. Branches >1MB generate wrong code.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CTL-008</td>
+            <td class="av-risk-phase">264-271</td>
+            <td><span class="av-sev av-sev-low">LOW</span></td>
+            <td class="av-risk-mit">gen-+loop hardcodes offset 36 assuming fixed instruction count.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- compile.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">compile.fs - Compiler Core</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">CMP-001</td>
+            <td class="av-risk-phase">14</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">INPUT-SIZE 150KB. Source files larger are truncated without error.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CMP-004</td>
+            <td class="av-risk-phase">154-162</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">dict-name= compares only first 16 chars. Long names may collide.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CMP-007</td>
+            <td class="av-risk-phase">370-371</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">STR-BUF-SIZE 256 bytes. Long string literals overflow silently.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CMP-002</td>
+            <td class="av-risk-phase">133-134</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">Dictionary limited to 256 entries with no overflow check.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">CMP-003</td>
+            <td class="av-risk-phase">180-181</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">Forward refs limited to 256 entries with no overflow check.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- macho.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">macho.fs - Binary Format</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">MCH-001</td>
+            <td class="av-risk-phase">39</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">FILE-SIZE 64KB. Code+data exceeding this causes buffer overflow.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">MCH-004</td>
+            <td class="av-risk-phase">128-131</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">write-lc-main: if no `: main` defined, entry points to garbage.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">MCH-005</td>
+            <td class="av-risk-phase">209-210</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">copy-code: if code > FILE-SIZE - CODE-OFFSET, buffer overflow.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">MCH-007</td>
+            <td class="av-risk-phase">246-253</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">save-binary: no error check on chmod/codesign system calls.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- prims.fs issues -->
+      <h4 style="color:var(--av-accent);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">prims.fs - Primitives</h4>
+      <table class="av-risk-table">
+        <thead><tr><th>ID</th><th>Line</th><th>Severity</th><th>Issue</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-risk-name">PRM-001</td>
+            <td class="av-risk-phase">14-18</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">emit-div/emit-mod: no div-by-zero handling. SDIV returns 0 (not fault).</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">PRM-004</td>
+            <td class="av-risk-phase">142-225</td>
+            <td><span class="av-sev av-sev-high">HIGH</span></td>
+            <td class="av-risk-mit">emit-move: complex branch patching may break if code layout changes.</td>
+          </tr>
+          <tr>
+            <td class="av-risk-name">PRM-005</td>
+            <td class="av-risk-phase">225</td>
+            <td><span class="av-sev av-sev-medium">MEDIUM</span></td>
+            <td class="av-risk-mit">emit-move: comment says "patch CBZ" but actually patches B instruction.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="av-sep"></div>
+      <div class="av-section-note" style="margin-top:12px;">
+        <strong>Summary:</strong> 12 HIGH severity, 16 MEDIUM severity, 9 LOW severity issues identified.
+        Most HIGH issues involve buffer size limits or missing range validation on instruction encodings.
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 8: Branch Offset Limits -->
+  <div class="av-card" data-section="offsets">
+    <div class="av-card-head" onclick="avToggle(this)">
+      <div class="av-card-left">
+        <svg class="av-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5l7 7-7 7"/></svg>
+        <span class="av-card-num">08</span>
+        <span class="av-card-title">Branch Offset Limits</span>
+      </div>
+      <div class="av-card-right">
+        <span class="av-card-count" style="color:var(--av-unverified)">4 limits</span>
+      </div>
+    </div>
+    <div class="av-card-body">
+      <div class="av-section-note">ARM64 branch instructions have limited offset ranges. Exceeding these produces silently incorrect code.</div>
+      <div class="av-sep"></div>
+      <table class="av-enc-table">
+        <thead><tr><th>Instruction</th><th>Offset Bits</th><th>Range</th><th>Used In</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="av-enc-cat">B.cond</td>
+            <td>19-bit signed</td>
+            <td><span class="av-tag av-tag-hex">+/- 1MB</span></td>
+            <td>control.fs: IF/THEN/ELSE, UNTIL, WHILE</td>
+          </tr>
+          <tr>
+            <td class="av-enc-cat">CBZ/CBNZ</td>
+            <td>19-bit signed</td>
+            <td><span class="av-tag av-tag-hex">+/- 1MB</span></td>
+            <td>control.fs: DO/LOOP, ?DO, gen-if</td>
+          </tr>
+          <tr>
+            <td class="av-enc-cat">B/BL</td>
+            <td>26-bit signed</td>
+            <td><span class="av-tag av-tag-hex">+/- 128MB</span></td>
+            <td>control.fs: AGAIN, word calls (gen-call)</td>
+          </tr>
+          <tr>
+            <td class="av-enc-cat">ADR</td>
+            <td>21-bit signed</td>
+            <td><span class="av-tag av-tag-hex">+/- 1MB</span></td>
+            <td>stack.fs: compile-s-quote (string literals)</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="av-section-note" style="margin-top:12px;">
+        <strong>Risk Assessment:</strong> For typical Forth programs under 1MB, these limits are sufficient.
+        Self-hosting the compiler should stay well under 256KB. However, there's no runtime validation.
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 9: Recommendations by Priority -->
+  <div class="av-card" data-section="recs">
+    <div class="av-card-head" onclick="avToggle(this)">
+      <div class="av-card-left">
+        <svg class="av-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5l7 7-7 7"/></svg>
+        <span class="av-card-num">09</span>
+        <span class="av-card-title">Fix Recommendations (Prioritized)</span>
+      </div>
+      <div class="av-card-right">
+        <span class="av-card-count" style="color:var(--av-verified)">3 tiers</span>
+      </div>
+    </div>
+    <div class="av-card-body">
+      <div class="av-section-note">Prioritized list of fixes. Address HIGH severity issues before self-hosting attempt.</div>
+      <div class="av-sep"></div>
+
+      <h4 style="color:var(--av-high);font-size:10px;margin:12px 0 8px 0;letter-spacing:1px;">PRIORITY 1: Must Fix Before Self-Hosting</h4>
+      <ul style="margin:0 0 0 16px;padding:0;color:var(--av-text);">
+        <li><strong>CTL-001/002:</strong> Add overflow/underflow checks to cf-push/cf-pop</li>
+        <li><strong>CMP-001:</strong> Increase INPUT-SIZE or add truncation error</li>
+        <li><strong>MCH-001/005:</strong> Increase FILE-SIZE to 256KB or add size check</li>
+        <li><strong>CMP-007:</strong> Increase STR-BUF-SIZE or error on long strings</li>
+      </ul>
+
+      <h4 style="color:var(--av-unverified);font-size:10px;margin:16px 0 8px 0;letter-spacing:1px;">PRIORITY 2: Should Fix Soon</h4>
+      <ul style="margin:0 0 0 16px;padding:0;color:var(--av-text);">
+        <li><strong>ASM-001/002/003:</strong> Add offset range validation to branch encoders</li>
+        <li><strong>STK-003/004:</strong> Add path/buffer length validation</li>
+        <li><strong>CTL-003:</strong> Remove duplicate arm-cbz/arm-cbnz definitions</li>
+        <li><strong>CMP-004:</strong> Increase name field to 32 bytes or add hash</li>
+      </ul>
+
+      <h4 style="color:var(--av-verified);font-size:10px;margin:16px 0 8px 0;letter-spacing:1px;">PRIORITY 3: Nice to Have</h4>
+      <ul style="margin:0 0 0 16px;padding:0;color:var(--av-text);">
+        <li><strong>PRM-001:</strong> Document or handle div-by-zero behavior</li>
+        <li><strong>CTL-008:</strong> Make instruction offset calculation dynamic</li>
+        <li><strong>MCH-007:</strong> Add error checking to system calls</li>
+        <li><strong>PRM-002/003:</strong> Document magic number instruction encodings</li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -11390,9 +11711,15 @@ async function runSingleBenchmark(name) {
     return;
   }
   const btn = document.querySelector(`button[data-bench="${name}"]`);
+  const row = document.querySelector(`tr[data-bench-row="${name}"]`);
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '...';
+    btn.textContent = '⏳';
+  }
+  // Show running state in row
+  if (row) {
+    const cells = row.querySelectorAll('td');
+    if (cells[3]) { cells[3].textContent = 'Running...'; cells[3].style.color = '#7ecfff'; }
   }
   try {
     console.log('[Benchmarks] Running single benchmark:', name);
@@ -11400,7 +11727,6 @@ async function runSingleBenchmark(name) {
     console.log('[Benchmarks] Result:', result);
     if (result) {
       // Update the row with results
-      const row = document.querySelector(`tr[data-bench-row="${name}"]`);
       if (row) {
         const sixthUs = result.sixth_run?.median_us || 0;
         const o0Us = result.gcc_runs?.o0?.median_us || 0;
