@@ -340,6 +340,66 @@ variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligne
   2drop false ;
 
 \ String literals
+256 constant STR-BUF-SIZE
+create str-temp STR-BUF-SIZE allot    \ temp buffer for parsing strings
+variable str-len                       \ length of parsed string
+
+: parse-string-to-temp ( -- )
+  \ Parse string from input until closing ", store in str-temp
+  \ Skip initial space after s" or ."
+  0 str-len !
+  input-pos @ input-len @ < if
+    input-buf input-pos @ + c@ 32 = if 1 input-pos +! then
+  then
+  \ Copy characters until "
+  begin
+    input-pos @ input-len @ < while
+    input-buf input-pos @ + c@
+    dup [char] " = if drop 1 input-pos +! exit then
+    str-temp str-len @ + c!
+    1 str-len +!
+    1 input-pos +!
+  repeat ;
+
+: compile-s-quote ( -- )
+  \ Parse string, emit inline with branch, push addr/len at runtime
+  parse-string-to-temp
+  str-len @ 0= if
+    \ Empty string: push some address and 0 length
+    0 emit-lit 0 emit-lit exit
+  then
+
+  \ Calculate padded length (round up to 4 bytes)
+  str-len @ 3 + 3 invert and          \ ( padded-len )
+
+  \ Calculate branch offset: skip B instruction (1) + padded bytes / 4
+  dup 2 rshift 1+                     \ ( padded-len branch-offset )
+
+  \ Emit B instruction to skip over string
+  arm-b emit32                        \ ( padded-len )
+
+  \ Remember where string starts (for address calculation)
+  code-pos @                          \ ( padded-len string-code-pos )
+
+  \ Emit string bytes
+  str-len @ 0 ?do
+    str-temp i + c@ >code
+  loop
+
+  \ Pad to 4-byte boundary
+  str-len @ 3 and ?dup if
+    4 swap - 0 ?do 0 >code loop
+  then
+  nip                                 \ ( string-code-pos ) - drop padded-len, keep string-code-pos
+
+  \ Now emit code to push address and length using PC-relative ADR
+  \ ADR calculates: PC + offset. We need offset = string_pos - adr_pos
+  push-tos                            \ save TOS to make room for address
+  dup code-pos @ -                    \ ( string-code-pos offset ) where offset = string_pos - adr_pos (negative)
+  19 swap arm-adr emit32              \ ADR X19, #offset (loads string addr into TOS)
+  drop                                \ drop string-code-pos
+  str-len @ emit-lit ;                \ push length as literal
+
 : compile-dot-quote ( -- )
   \ Read and compile string until closing quote
   \ Skip initial space after ."
@@ -357,6 +417,7 @@ variable var-next   0 var-next !    \ next offset in DATA segment (8-byte aligne
 
 : try-string ( addr u -- handled? )
   2dup s\" .\"" str= if 2drop compile-dot-quote true exit then
+  2dup s\" s\"" str= if 2drop compile-s-quote true exit then
   2drop false ;
 
 \ Control flow handling - requires cf-push/cf-pop from control.fs

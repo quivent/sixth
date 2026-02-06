@@ -30,6 +30,18 @@ variable code-pos   0 code-pos !
   16 / 21 lshift swap 5 lshift or or $F2800000 or ;
 
 \ ============================================================
+\ PC-RELATIVE ADDRESS
+\ ============================================================
+
+\ ADR Xd, #offset - loads PC + offset into Xd
+\ offset is signed 21-bit, split: immlo=bits[1:0], immhi=bits[20:2]
+: arm-adr ( rd offset -- insn )
+  dup 3 and 29 lshift        \ immlo << 29
+  swap 2 rshift $7FFFF and 5 lshift or   \ immhi << 5
+  swap or                    \ rd
+  $10000000 or ;             \ ADR opcode
+
+\ ============================================================
 \ SUPERVISOR CALL
 \ ============================================================
 
