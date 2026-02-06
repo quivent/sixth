@@ -180,57 +180,66 @@ variable cf-sp  0 cf-sp !
   9 28 -8 arm-str-pre emit32         \ STR X9, [X28, #-8]! (push limit)
   19 28 -8 arm-str-pre emit32        \ STR X19, [X28, #-8]! (push index)
   emit-drop                          \ pop index from data stack
-  0                                  \ orig placeholder for leave (none yet)
-  code-here ;                        \ dest = loop body start
   \ Return stack now: ... limit index  with [X28]=index, [X28,#8]=limit
+  \ Zero-iter check: if index >= limit, skip (works for ascending LOOP)
+  \ gen-+loop will NOP this out since it handles both directions
+  9 28 0 arm-ldr-off emit32          \ LDR X9, [X28] (index)
+  10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit)
+  9 10 arm-cmp-reg emit32            \ CMP X9, X10 (index - limit)
+  code-here                          \ orig = position of B.GE for patching
+  $5400000A emit32                   \ B.GE placeholder (cond=GE=0xA)
+  code-here ;                        \ dest = loop body start
 
 : gen-loop ( orig dest -- )
   \ Increment index, compare with limit, branch back if index < limit
   \ Return stack: [X28]=index, [X28+8]=limit (offset in cells, not bytes)
+  swap cf-push                       \ save orig to cf-stack for patching later
   9 28 0 arm-ldr-off emit32          \ LDR X9, [X28] (index)
   9 9 1 arm-add-imm emit32           \ ADD X9, X9, #1
   9 28 0 arm-str-off emit32          \ STR X9, [X28] (store back)
   10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit at offset 1*8)
   \ Compare: if index < limit, continue looping
   9 10 arm-cmp-reg emit32            \ CMP X9, X10 (index - limit)
-  \ B.LT back to dest
-  \ Stack: (orig dest)
+  \ B.LT back to dest (dest is on data stack)
   code-here -                        \ offset = dest - code-here (bytes, negative)
   4 /                                \ offset in instructions
   $7FFFF and 5 lshift                \ mask to 19 bits, shift to position
   $54000000 or                       \ B.cond base opcode
   $B or                              \ cond = LT (0xB)
   emit32
+  \ Patch B.GE from gen-do to jump to cleanup
+  code-here cf-pop patch-branch
   \ Clean up return stack: drop limit and index
-  28 28 16 arm-add-imm emit32        \ ADD X28, X28, #16
-  \ Handle any leave forward references
-  drop ;                             \ discard orig (no leaves implemented yet)
+  28 28 16 arm-add-imm emit32 ;      \ ADD X28, X28, #16
 
 : gen-+loop ( orig dest -- )
   \ Add TOS to index, check for bounds crossing, branch back if not done
   \ ( n -- ) adds n to index
   \ Return stack: [X28]=index, [X28+8]=limit (offset in cells)
+  \ NOP out the B.GE from gen-do (it's wrong for negative steps)
+  swap code-buf + $D503201F swap l!  \ Write NOP at orig position
   9 28 0 arm-ldr-off emit32          \ LDR X9, [X28] (old index)
-  10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit at offset 1*8)
-  \ new_index = old_index + n (TOS)
+  10 28 1 arm-ldr-off emit32         \ LDR X10, [X28, #8] (limit)
+  \ new_index = old_index + step (TOS)
   11 9 19 arm-add-reg emit32         \ ADD X11, X9, X19 (new index)
   11 28 0 arm-str-off emit32         \ STR X11, [X28] (store new index)
   emit-drop                          \ pop increment from data stack
-  \ Bounds check: loop exits when index crosses limit
-  \ For positive increment: exit when new_index >= limit
-  \ Simple version: just check new_index < limit (for positive loops)
-  11 10 arm-cmp-reg emit32           \ CMP X11, X10 (new_index - limit)
-  \ B.LT back to dest
-  \ Stack: (orig dest)
+  \ ANS Forth boundary crossing check:
+  \ Exit when index crosses from (limit-1) to limit in either direction
+  \ Check: (old_index - limit) XOR (new_index - limit) < 0 means crossed
+  9 9 10 arm-sub-reg emit32          \ SUB X9, X9, X10 (old_diff = old - limit)
+  11 11 10 arm-sub-reg emit32        \ SUB X11, X11, X10 (new_diff = new - limit)
+  9 9 11 arm-eor-reg emit32          \ EOR X9, X9, X11 (xor result)
+  9 0 arm-cmp-imm emit32             \ CMP X9, #0 (set flags based on XOR result)
+  \ B.PL back to dest (continue if positive = no sign change = no crossing)
   code-here -                        \ offset = dest - code-here (bytes, negative)
   4 /                                \ offset in instructions
   $7FFFF and 5 lshift                \ mask to 19 bits, shift to position
   $54000000 or                       \ B.cond base opcode
-  $B or                              \ cond = LT
+  $5 or                              \ cond = PL (positive or zero, 0x5)
   emit32
   \ Clean up return stack
-  28 28 16 arm-add-imm emit32
-  drop ;                             \ discard orig
+  28 28 16 arm-add-imm emit32 ;
 
 : emit-i ( -- )  \ ( -- index ) copy current loop index to data stack
   push-tos                           \ save TOS

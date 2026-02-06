@@ -189,21 +189,25 @@ variable pend-count  0 pend-count !
 
 : resolve-pending ( name-addr name-len target -- )
   \ Patch all pending calls to this word
-  \ Scan backwards so we can remove resolved entries
+  \ Scan through all pending entries
   pend-count @ 0 ?do
-    pend-count @ 1- i - pend-entry  \ iterate from end
-    >r
-    2dup r@ swap 16 min          \ ( name-addr name-len target entry name-addr len )
-    2swap drop                   \ ( name-addr name-len target name-addr len entry )
-    -rot                         \ ( name-addr name-len target entry name-addr len )
-    r@ dict-name= if             \ compare names
-      \ Match found - patch and mark for removal
-      dup r@ 16 + @              \ ( name-addr name-len target target call-site )
-      patch-call                 \ patch the BL instruction
-      \ Mark entry as resolved by zeroing name
-      r@ 16 0 fill
+    i pend-entry                  \ ( name-addr name-len target entry )
+    dup c@ 0= if                  \ skip already-resolved entries (zeroed name)
+      drop                        \ ( name-addr name-len target )
+    else
+      \ Compare entry name with word name
+      \ Need ( name-addr name-len entry ) for dict-name=
+      >r 2 pick 2 pick r@         \ ( name-addr name-len target name-addr name-len entry )
+      dict-name= if               \ ( name-addr name-len target )
+        \ Match found - patch the call
+        r@ 16 + @                 \ ( name-addr name-len target call-site )
+        over swap                 \ ( name-addr name-len target target call-site )
+        patch-call                \ ( name-addr name-len target )
+        \ Mark entry as resolved
+        r@ 16 0 fill
+      then
+      r> drop                     \ ( name-addr name-len target )
     then
-    r> drop
   loop
   2drop drop ;
 
