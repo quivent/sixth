@@ -456,6 +456,7 @@ variable str-len                       \ length of parsed string
   2dup s" while" str= if 2drop cf-pop gen-while cf-push cf-push true exit then
   2dup s" repeat" str= if 2drop cf-pop cf-pop gen-repeat true exit then
   \ Do/loop control flow
+  2dup s" ?do" str= if 2drop gen-?do cf-push cf-push true exit then
   2dup s" do" str= if 2drop gen-do cf-push cf-push true exit then
   2dup s" loop" str= if 2drop cf-pop cf-pop gen-loop true exit then
   2dup s" +loop" str= if 2drop cf-pop cf-pop gen-+loop true exit then
@@ -545,29 +546,57 @@ variable str-len                       \ length of parsed string
   dup 0= if 2drop ." Missing variable name" cr 1 throw then
   var-add ;                      \ add to var-buf, allocate 8 bytes in DATA segment
 
+: create-add ( addr u -- )
+  \ Add create'd name to table, but don't allocate (ALLOT does that)
+  var-count @ var-entry          \ get entry address
+  dup 16 0 fill                  \ clear name area
+  >r
+  r@ swap 16 min move            \ copy name (max 16 chars)
+  var-next @ r@ 16 + !           \ store current offset
+  r> drop
+  1 var-count +! ;               \ NO var-next increment - ALLOT does it
+
+: compile-create ( -- )
+  \ Syntax: create <name>
+  get-token                      \ get name
+  dup 0= if 2drop ." Missing create name" cr 1 throw then
+  create-add ;
+
+variable allot-pending  0 allot-pending !  \ for top-level allot
+
+: compile-allot-toplevel ( n -- )
+  \ Top-level allot: add n to var-next
+  var-next +! ;
+
 : compile-source ( addr u -- )
   \ Copy source to input buffer
   dup input-len !
   input-buf swap move
   0 input-pos !
   0 code-pos !
+  0 allot-pending !
   \ Parse and compile
   begin
     get-token
     dup 0= if 2drop exit then
     2dup s" :" str= if
       2drop compile-colon
+    else 2dup s" constant" str= if
+      2drop compile-constant
+    else 2dup s" variable" str= if
+      2drop compile-variable
+    else 2dup s" create" str= if
+      2drop compile-create
+    else 2dup s" allot" str= if
+      2drop allot-pending @ compile-allot-toplevel 0 allot-pending !
     else
-      2dup s" constant" str= if
-        2drop compile-constant
+      \ Try parsing as number for top-level allot
+      2dup parse-number if
+        -rot 2drop allot-pending !
       else
-        2dup s" variable" str= if
-          2drop compile-variable
-        else
-          2drop   \ skip unknown top-level tokens for now
-        then
+        2drop   \ skip unknown top-level tokens
       then
-    then
+    then then then then then
   again ;
 
 : compile-string ( addr u -- )
