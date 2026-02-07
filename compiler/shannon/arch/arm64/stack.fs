@@ -313,14 +313,6 @@ $FFFFFFFF constant MAX-HERE-OFFSET
 3328 constant SLURP-BUF-OFFSET
 262144 constant SLURP-BUF-SIZE
 
-\ Helper: store 32-bit value at code-buf + offset (for patching instructions)
-: patch32 ( u32 offset -- )
-  code-buf + >r
-  dup $FF and r@ c!
-  8 rshift dup $FF and r@ 1+ c!
-  8 rshift dup $FF and r@ 2 + c!
-  8 rshift $FF and r> 3 + c! ;
-
 : emit-open-file ( -- )  \ ( c-addr u fam -- fileid ior )
   \ Copy path to null-terminated buffer, then open()
   \ Save fam (flags) to X11

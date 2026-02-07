@@ -15,6 +15,34 @@
 create input-buf INPUT-SIZE allot
 variable input-pos   0 input-pos !
 variable input-len   0 input-len !
+variable input-base  0 input-base !   \ base offset within input-buf for current file
+
+\ ============================================================
+\ INCLUDE STACK (for nested includes)
+\ ============================================================
+\ Each entry: input-pos, input-len, input-base (3 cells)
+8 constant MAX-INCLUDE-DEPTH
+create include-stack MAX-INCLUDE-DEPTH 3 * cells allot
+variable include-depth  0 include-depth !
+
+: include-push ( -- )
+  include-depth @ MAX-INCLUDE-DEPTH < 0= if
+    ." Include nesting too deep" cr 1 throw
+  then
+  include-stack include-depth @ 3 * cells +
+  input-pos @ over !
+  cell+ input-len @ over !
+  cell+ input-base @ swap !
+  1 include-depth +! ;
+
+: include-pop ( -- flag )  \ true if there was something to pop
+  include-depth @ 0= if false exit then
+  -1 include-depth +!
+  include-stack include-depth @ 3 * cells +
+  dup @ input-pos !
+  cell+ dup @ input-len !
+  cell+ @ input-base !
+  true ;
 
 \ ============================================================
 \ STRING COMPARISON
@@ -32,10 +60,14 @@ variable input-len   0 input-len !
 \ TOKENIZER
 \ ============================================================
 
+\ Helper: get address within current input region
+: input-at ( offset -- addr )
+  input-buf input-base @ + + ;
+
 : skip-ws ( -- )
   begin
     input-pos @ input-len @ < 0= if exit then
-    input-buf input-pos @ + c@ 33 < if
+    input-pos @ input-at c@ 33 < if
       1 input-pos +!
     else
       exit
@@ -45,7 +77,7 @@ variable input-len   0 input-len !
 : skip-line ( -- )
   begin
     input-pos @ input-len @ < 0= if exit then
-    input-buf input-pos @ + c@ 10 = if 1 input-pos +! exit then
+    input-pos @ input-at c@ 10 = if 1 input-pos +! exit then
     1 input-pos +!
   again ;
 
@@ -53,18 +85,18 @@ variable input-len   0 input-len !
   skip-ws
   input-pos @ input-len @ < 0= if 0 0 exit then
   \ Skip line comments (\)
-  input-buf input-pos @ + c@ [char] \ = if
+  input-pos @ input-at c@ [char] \ = if
     skip-line
     recurse exit
   then
   \ Skip paren comments ( ... )
-  input-buf input-pos @ + c@ [char] ( = if
+  input-pos @ input-at c@ [char] ( = if
     input-pos @ 1+ input-len @ < if
-      input-buf input-pos @ 1+ + c@ 33 < if
+      input-pos @ 1+ input-at c@ 33 < if
         1 input-pos +!
         begin
           input-pos @ input-len @ < 0= if 0 0 exit then
-          input-buf input-pos @ + c@ [char] ) = if
+          input-pos @ input-at c@ [char] ) = if
             1 input-pos +! recurse exit
           then
           1 input-pos +!
@@ -73,10 +105,10 @@ variable input-len   0 input-len !
     then
   then
   \ Return token
-  input-buf input-pos @ +
+  input-pos @ input-at
   0 begin
     input-pos @ input-len @ < while
-    input-buf input-pos @ + c@ 32 > while
+    input-pos @ input-at c@ 32 > while
     1 input-pos +!
     1+
   repeat then ;
@@ -115,8 +147,23 @@ variable parse-addr   \ temp storage for parsing
   loop
   true ;
 
+: parse-hex ( addr u -- n true | false )
+  dup 0= if 2drop false exit then
+  over c@ hex-digit? 0= if 2drop false exit then
+  swap parse-addr !   \ ( u )
+  0 swap 0 ?do        \ ( acc )
+    parse-addr @ i + c@ hex-digit? 0= if drop false unloop exit then
+    16 * parse-addr @ i + c@ char>digit +
+  loop
+  true ;
+
 : parse-number ( addr u -- n true | false )
   dup 0= if 2drop false exit then
+  \ Check for hex prefix $
+  over c@ [char] $ = if
+    1- swap 1+ swap                \ skip $: ( addr+1 u-1 )
+    parse-hex exit
+  then
   \ Check for leading minus sign
   over c@ [char] - = if
     1- swap 1+ swap                \ skip minus: ( addr+1 u-1 )
@@ -551,18 +598,16 @@ variable str-len                       \ length of parsed string
 \ TOP-LEVEL COMPILER
 \ ============================================================
 
+variable allot-pending  0 allot-pending !  \ for top-level number before constant
+
 : compile-constant ( -- )
-  \ Syntax: <value> constant <name>
-  \ At top-level, we parse: constant <name> <value>
-  \ This differs from standard Forth but is easier to parse
+  \ Syntax: <value> constant <name>  (standard Forth)
+  \ Value was parsed previously and stored in allot-pending
   get-token                      \ get name
   dup 0= if 2drop ." Missing constant name" cr 1 throw then
-  get-token                      \ get value
-  dup 0= if 2drop 2drop ." Missing constant value" cr 1 throw then
-  parse-number 0= if
-    ." Constant value must be a number" cr 1 throw
-  then
-  -rot const-add ;               \ ( value name-addr name-u -- )
+  allot-pending @                \ get the value
+  -rot const-add                 \ ( value name-addr name-u -- )
+  0 allot-pending ! ;            \ clear for next use
 
 : compile-variable ( -- )
   \ Syntax: variable <name>
@@ -586,23 +631,43 @@ variable str-len                       \ length of parsed string
   dup 0= if 2drop ." Missing create name" cr 1 throw then
   create-add ;
 
-variable allot-pending  0 allot-pending !  \ for top-level allot
-
 : compile-allot-toplevel ( n -- )
   \ Top-level allot: add n to var-next
   var-next +! ;
 
-: compile-source ( addr u -- )
-  \ Copy source to input buffer
+\ Helper to set input for a file (for includes)
+: set-input ( addr u base -- )
+  input-base !
   dup input-len !
-  input-buf swap move
-  0 input-pos !
-  0 code-pos !
-  0 allot-pending !
-  \ Parse and compile
+  input-buf input-base @ + swap move
+  0 input-pos ! ;
+
+\ Process include directive
+: do-include ( -- )
+  get-token dup 0= if
+    ." include: missing filename" cr 2drop 1 throw
+  then
+  \ Save current state
+  include-push
+  \ Slurp the included file
+  slurp-file
+  dup 0= if
+    ." include: file not found or empty" cr 2drop
+    include-pop drop exit
+  then
+  \ Set new input (after current file's content to avoid overwriting)
+  input-base @ input-len @ + set-input ;
+
+\ Main compilation loop (processes current input)
+: process-tokens ( -- )
   begin
     get-token
-    dup 0= if 2drop exit then
+    dup 0= if
+      \ EOF: check include stack
+      2drop
+      include-pop if recurse then
+      exit
+    then
     2dup s" :" str= if
       2drop compile-colon
     else 2dup s" constant" str= if
@@ -613,6 +678,10 @@ variable allot-pending  0 allot-pending !  \ for top-level allot
       2drop compile-create
     else 2dup s" allot" str= if
       2drop allot-pending @ compile-allot-toplevel 0 allot-pending !
+    else 2dup s" include" str= if
+      2drop do-include
+    else 2dup s" require" str= if
+      2drop do-include   \ treat require same as include for now
     else
       \ Try parsing as number for top-level allot
       2dup parse-number if
@@ -620,8 +689,17 @@ variable allot-pending  0 allot-pending !  \ for top-level allot
       else
         2drop   \ skip unknown top-level tokens
       then
-    then then then then then
+    then then then then then then then
   again ;
+
+: compile-source ( addr u -- )
+  \ Copy source to input buffer
+  0 set-input
+  0 code-pos !
+  0 allot-pending !
+  0 include-depth !
+  \ Parse and compile
+  process-tokens ;
 
 : compile-string ( addr u -- )
   compile-source
