@@ -74,10 +74,15 @@ impl AppState {
         drop(db);
 
         let mut manifest = self.manifest.lock().unwrap();
+        let before_total = manifest.words.len();
         let before_done = manifest.words.iter().filter(|w| w.status == crate::models::WordStatus::Done).count();
         manifest.update_from_scan(&arm64_words, &overrides, &adversarial_tests, &test_results);
+        let after_total = manifest.words.len();
         let after_done = manifest.words.iter().filter(|w| w.status == crate::models::WordStatus::Done).count();
-        eprintln!("[rescan] Done words: {} -> {} (diff: {})", before_done, after_done, after_done as i32 - before_done as i32);
+        eprintln!("[rescan] Total words: {} (was {}, +{} new from ARM64)",
+            after_total, before_total, after_total - before_total);
+        eprintln!("[rescan] Done: {}/{} ({:.0}%)",
+            after_done, after_total, (after_done as f64 / after_total as f64) * 100.0);
     }
 
     /// Get current word data (after scan + overrides)
@@ -131,7 +136,13 @@ impl AppState {
     }
 
     /// Detect which phases are complete based on ARM64 test results
+    /// NOTE: Returns empty set to avoid blocking UI. Use refresh_adversarial_tests to update.
     fn detect_arm64_completed_phases(&self) -> std::collections::HashSet<u8> {
+        // DISABLED: Running shell scripts synchronously freezes the UI.
+        // Phase completion detection should be done async or cached.
+        std::collections::HashSet::new()
+
+        /*
         use std::collections::{HashMap, HashSet};
         use std::process::Command;
 
@@ -183,6 +194,7 @@ impl AppState {
             .filter(|(_, (pass, fail))| *pass > 0 && *fail == 0)
             .map(|(phase, _)| phase)
             .collect()
+        */
     }
 
     /// Toggle a gate check

@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::models::{FileInfo, TestCategoryGroup, TestResult, TestRun, TestSummary, Word, WordStatus};
 use crate::parser;
@@ -275,26 +275,40 @@ pub fn read_source_file(path: String, state: State<AppState>) -> Result<String, 
 
 /// Scan all test files and return them grouped by category.
 /// Does NOT run tests - just discovers what exists.
+/// Made async to avoid blocking UI.
 #[tauri::command]
-pub fn scan_all_tests(state: State<AppState>) -> Vec<TestCategoryGroup> {
-    let result = runner::scan_all_tests(state.project_root());
+pub async fn scan_all_tests(state: State<'_, AppState>) -> Result<Vec<TestCategoryGroup>, String> {
+    let project_root = state.project_root().to_path_buf();
+
+    let result = tokio::task::spawn_blocking(move || {
+        runner::scan_all_tests(&project_root)
+    }).await.map_err(|e| format!("Task failed: {}", e))?;
+
     eprintln!("[scan_all_tests] Found {} categories with {} total tests",
         result.len(),
         result.iter().map(|g| g.tests.len()).sum::<usize>());
-    result
+    Ok(result)
 }
 
 /// Run all tests and return results grouped by category.
 /// This runs the full test suite (~1660 tests) - may take a few seconds.
 #[tauri::command]
-pub fn run_all_tests(state: State<AppState>) -> Result<Vec<TestCategoryGroup>, String> {
-    runner::run_all_tests_grouped(state.project_root())
+pub async fn run_all_tests(state: State<'_, AppState>) -> Result<Vec<TestCategoryGroup>, String> {
+    let project_root = state.project_root().to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        runner::run_all_tests_grouped(&project_root)
+    }).await.map_err(|e| format!("Task failed: {}", e))?
 }
 
 /// Run a single test by name and return the result.
 #[tauri::command]
-pub fn run_single_test(name: String, state: State<AppState>) -> Result<TestResult, String> {
-    runner::run_single_test(state.project_root(), &name)
+pub async fn run_single_test(name: String, state: State<'_, AppState>) -> Result<TestResult, String> {
+    let project_root = state.project_root().to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        runner::run_single_test(&project_root, &name)
+    }).await.map_err(|e| format!("Task failed: {}", e))?
 }
 
 /// Read a test file from compiler/tests/ directory.
@@ -554,27 +568,43 @@ pub fn run_benchmarks(state: State<AppState>) -> BenchmarkSummary {
     benchmark::run_all_benchmarks(state.project_root())
 }
 
-/// Run a single benchmark by name (quick mode - 3 iterations for responsiveness)
+/// Run a single benchmark by name - async to avoid blocking UI
 #[tauri::command]
-pub fn run_benchmark(name: String, state: State<AppState>) -> Option<crate::models::BenchmarkResult> {
-    println!("[benchmark] Running single benchmark: {}", name);
-    let definitions = benchmark::get_benchmark_definitions();
-    let def = definitions.iter().find(|d| d.name == name)?;
+pub async fn run_benchmark(
+    name: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<crate::models::BenchmarkResult, String> {
+    println!("[benchmark] Starting async benchmark: {}", name);
 
-    // Prepare GCC binaries (compile bench.c at all optimization levels)
-    let gcc_binaries = match benchmark::prepare_gcc_binaries(state.project_root()) {
-        Ok(bins) => bins,
-        Err(e) => {
-            println!("[benchmark] Failed to compile GCC: {}", e);
-            return None;
-        }
-    };
+    let project_root = state.project_root().to_path_buf();
+    let bench_name = name.clone();
 
-    let temp_dir = std::env::temp_dir().join("sixth-benchmarks");
-    let _ = std::fs::create_dir_all(&temp_dir);
+    // Run in blocking thread pool to avoid blocking async runtime
+    let result = tokio::task::spawn_blocking(move || {
+        let definitions = benchmark::get_benchmark_definitions();
+        let def = match definitions.iter().find(|d| d.name == bench_name) {
+            Some(d) => d,
+            None => return Err(format!("Benchmark '{}' not found", bench_name)),
+        };
 
-    // Use 3 runs for quick single-benchmark testing (vs 10 for full suite)
-    let result = benchmark::run_benchmark(state.project_root(), def, &temp_dir, &gcc_binaries, 3);
-    println!("[benchmark] Done: {}", name);
-    Some(result)
+        // Prepare GCC binaries
+        let gcc_binaries = benchmark::prepare_gcc_binaries(&project_root)
+            .map_err(|e| format!("GCC compile failed: {}", e))?;
+
+        let temp_dir = std::env::temp_dir().join("sixth-benchmarks");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Run with just 1 iteration for quick feedback
+        let result = benchmark::run_benchmark(&project_root, def, &temp_dir, &gcc_binaries, 1);
+        println!("[benchmark] Done: {}", def.name);
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
+
+    // Emit event so UI can update
+    let _ = app.emit("benchmark-complete", &result);
+
+    Ok(result)
 }

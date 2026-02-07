@@ -192,7 +192,7 @@ impl WordManifest {
     /// Update word statuses based on what's actually defined in ARM64 files.
     /// Words found in arch/arm64/*.fs get status "done".
     /// Manual overrides (from DB) take precedence.
-    /// Also updates test coverage from adversarial test scan.
+    /// ARM64 words are the source of truth. Manifest provides metadata (phase, notes).
     pub fn update_from_scan(
         &mut self,
         arm64_words: &HashMap<String, HashSet<String>>,
@@ -200,43 +200,69 @@ impl WordManifest {
         adversarial_tests: &HashMap<String, Vec<String>>,
         test_results: &HashMap<String, bool>,
     ) {
-        // Collect all ARM64 words into a flat set
-        let arm64_all: HashSet<&String> = arm64_words.values().flat_map(|s| s.iter()).collect();
-
-        for word in &mut self.words {
-            // Manual override takes highest priority
-            if let Some(status) = overrides.get(&word.word) {
-                word.status = status.clone();
-            } else if arm64_all.contains(&word.word) {
-                // If the word exists in ARM64 files, it's done
-                word.status = WordStatus::Done;
+        // Collect all ARM64 words with their source files
+        let mut arm64_all: HashMap<String, String> = HashMap::new();
+        for (file, words) in arm64_words {
+            for word in words {
+                arm64_all.insert(word.clone(), file.clone());
             }
-            // Otherwise keep the manifest's baseline status
+        }
 
-            // Update test coverage
-            if let Some(tests) = adversarial_tests.get(&word.word) {
-                word.tests = tests.clone();
+        // Build lookup from manifest for metadata (phase, notes)
+        let manifest_meta: HashMap<String, (u8, String)> = self.words.iter()
+            .map(|w| (w.word.clone(), (w.phase, w.note.clone())))
+            .collect();
 
-                // Count passing/failing tests
-                let mut passing = 0u32;
-                let mut failing = 0u32;
-                for test_name in tests {
-                    if let Some(&passed) = test_results.get(test_name) {
-                        if passed {
-                            passing += 1;
-                        } else {
-                            failing += 1;
-                        }
-                    }
-                    // If test wasn't run, don't count it either way
-                }
-                word.tests_passing = passing;
-                word.tests_failing = failing;
+        // ARM64 words are the source of truth - rebuild word list from scratch
+        let mut new_words = Vec::new();
+        for (word_name, file) in &arm64_all {
+            let (phase, note) = manifest_meta.get(word_name)
+                .cloned()
+                .unwrap_or((0, String::new()));
+
+            let status = if let Some(s) = overrides.get(word_name) {
+                s.clone()
             } else {
-                word.tests = vec![];
-                word.tests_passing = 0;
-                word.tests_failing = 0;
+                WordStatus::Done // In ARM64, so it's done
+            };
+
+            let mut word = Word {
+                word: word_name.clone(),
+                phase,
+                file: file.clone(),
+                status,
+                note,
+                tests: vec![],
+                tests_passing: 0,
+                tests_failing: 0,
+            };
+            Self::update_word_tests(&mut word, adversarial_tests, test_results);
+            new_words.push(word);
+        }
+
+        self.words = new_words;
+    }
+
+    fn update_word_tests(
+        word: &mut Word,
+        adversarial_tests: &HashMap<String, Vec<String>>,
+        test_results: &HashMap<String, bool>,
+    ) {
+        if let Some(tests) = adversarial_tests.get(&word.word) {
+            word.tests = tests.clone();
+            let mut passing = 0u32;
+            let mut failing = 0u32;
+            for test_name in tests {
+                if let Some(&passed) = test_results.get(test_name) {
+                    if passed { passing += 1; } else { failing += 1; }
+                }
             }
+            word.tests_passing = passing;
+            word.tests_failing = failing;
+        } else {
+            word.tests = vec![];
+            word.tests_passing = 0;
+            word.tests_failing = 0;
         }
     }
 
