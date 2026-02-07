@@ -1,4 +1,4 @@
-\ Adversarial: ?dup with non-zero must duplicate
+\ expect: 247
 \ Tests that CBZ does NOT branch when TOS is non-zero
 \ If non-zero, ?dup should leave x x, then = gives -1 (true)
 \ expect: 247

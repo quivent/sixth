@@ -1,4 +1,4 @@
-\ Adversarial: ?dup with zero must NOT duplicate
+\ expect: 99
 \ Tests that CBZ correctly branches around push-tos when TOS=0
 \ If ?dup incorrectly duplicates, drop leaves 0, then 99+ gives 99
 \ But if correct, we have one 0, 99+ gives 99 anyway

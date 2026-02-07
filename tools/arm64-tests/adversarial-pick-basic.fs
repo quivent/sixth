@@ -4,16 +4,30 @@
 : main
   10 20 30 40 50
   \ Stack: 10 20 30 40 50
-  0 pick 50 - abs       \ 0 pick = 50 (dup)
-  swap drop             \ remove the picked value
-  1 pick 40 - abs +     \ 1 pick = 40 (over)
-  swap drop
-  2 pick 30 - abs +     \ 2 pick = 30
-  swap drop
-  3 pick 20 - abs +     \ 3 pick = 20
-  swap drop
-  4 pick 10 - abs +     \ 4 pick = 10
-  swap drop
-  \ Clean up remaining stack
-  drop drop drop drop drop
+  0 pick 50 - abs       \ 0 pick should be 50 (dup)
+  1 pick 40 - abs +     \ 1 pick should be 40 (over) - note: stack changed
+  \ Now stack is: 10 20 30 40 50 <picked> <sum>
+  \ Need fresh setup for each test
+  drop drop drop drop drop drop drop
+
+  \ Test each pick individually and accumulate errors
+  10 20 30 40 50
+  0 pick 50 - abs   \ err0
+  >r drop drop drop drop drop r>
+
+  10 20 30 40 50
+  1 pick 40 - abs   \ err1
+  >r drop drop drop drop drop r> +
+
+  10 20 30 40 50
+  2 pick 30 - abs   \ err2
+  >r drop drop drop drop drop r> +
+
+  10 20 30 40 50
+  3 pick 20 - abs   \ err3
+  >r drop drop drop drop drop r> +
+
+  10 20 30 40 50
+  4 pick 10 - abs   \ err4
+  >r drop drop drop drop drop r> +
 ;

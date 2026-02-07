@@ -1,7 +1,7 @@
+\ expect: 0
 \ adversarial-2over-similar.fs - Test 2over with similar values to catch offset bugs
 \ Tests: If x1 x2 could be confused with x3 x4 due to wrong offset
 \ Edge case: Adjacent values that differ by small amounts
-\ expect: 1
 \
 \ 2over: ( x1 x2 x3 x4 -- x1 x2 x3 x4 x1 x2 )
 \ Bug to catch: implementation reading x3 x4 instead of x1 x2
@@ -13,19 +13,13 @@
   100 200 101 201 2over
 
   \ Stack now: 100 200 101 201 100 200 (TOS=200)
-  \ Verify copied pair is 100 200, not 101 201
+  \ Verify using subtraction/abs pattern
 
-  200 =       \ TOS should be 200
-  swap 100 =  \ next should be 100
-  and
-
-  \ Verify middle pair still 101 201
-  swap 201 = and
-  swap 101 = and
-
-  \ Verify bottom pair still 100 200
-  swap 200 = and
-  swap 100 = and
-
-  if 1 else 0 then
+  200 - abs            \ TOS should be 200
+  swap 100 - abs +     \ next should be 100
+  swap 201 - abs +     \ x4 should be 201
+  swap 101 - abs +     \ x3 should be 101
+  swap 200 - abs +     \ x2 should be 200
+  swap 100 - abs +     \ x1 should be 100
+  \ Returns 0 if all matched, non-zero otherwise
 ;

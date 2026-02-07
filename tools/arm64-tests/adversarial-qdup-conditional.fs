@@ -1,4 +1,4 @@
-\ Adversarial: ?dup immediately followed by if/then
+\ expect: 100
 \ This is the common idiom: ?dup if <use-it> then
 \ Tests that CBZ in ?dup doesn't corrupt flags used by subsequent if
 \ expect: 100

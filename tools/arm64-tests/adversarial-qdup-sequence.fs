@@ -1,4 +1,4 @@
-\ Adversarial: Multiple ?dup in sequence with mixed zero/nonzero
+\ expect: 12
 \ Tests that branch offsets are computed correctly when
 \ multiple ?dup instructions are emitted in sequence
 \ Also tests stack management across multiple conditionals

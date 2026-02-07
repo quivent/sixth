@@ -1,4 +1,4 @@
-\ Adversarial: ?dup inside loops with varying zero/nonzero
+\ expect: 55
 \ Tests that branch calculation works when ?dup is in loop body
 \ Also tests interaction with loop counter
 \ expect: 55

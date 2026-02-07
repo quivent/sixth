@@ -1,4 +1,4 @@
 \ expect: 0
 \ Negative constant
-constant NEG -50
+-50 constant NEG
 : main NEG 50 + ;
