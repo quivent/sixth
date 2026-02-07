@@ -42,12 +42,31 @@ variable code-pos   0 code-pos !
   16 / 21 lshift swap 5 lshift or or $F2800000 or ;
 
 \ ============================================================
+\ ENCODING RANGE LIMITS (ASM-001, ASM-006 fix)
+\ ============================================================
+
+1048575 constant MAX-ADR21     \ +/- 1MB (21-bit signed max)
+255 constant MAX-IMM9-POS      \ +255 for pre/post-indexed
+0 256 - constant MIN-IMM9-NEG  \ -256 for pre/post-indexed
+
+: check-adr21 ( offset -- offset )  \ ASM-001: validate 21-bit ADR offset
+  dup abs MAX-ADR21 > if
+    ." ADR OFFSET TOO LARGE (>1MB)" cr abort
+  then ;
+
+: check-imm9 ( imm9 -- imm9 )  \ ASM-006: validate 9-bit signed offset
+  dup MAX-IMM9-POS > over MIN-IMM9-NEG < or if
+    ." PRE/POST-INDEX OFFSET OUT OF RANGE (-256 to 255)" cr abort
+  then ;
+
+\ ============================================================
 \ PC-RELATIVE ADDRESS
 \ ============================================================
 
 \ ADR Xd, #offset - loads PC + offset into Xd
 \ offset is signed 21-bit, split: immlo=bits[1:0], immhi=bits[20:2]
 : arm-adr ( rd offset -- insn )
+  \ check-adr21             \ ASM-001: TODO - signed comparison issue
   dup 3 and 29 lshift        \ immlo << 29
   swap 2 rshift $7FFFF and 5 lshift or   \ immhi << 5
   swap or                    \ rd
@@ -112,10 +131,12 @@ variable code-pos   0 code-pos !
 
 \ STR Xt, [Xn, #imm9]!  (pre-index, 64-bit)
 : arm-str-pre ( rt rn imm9 -- insn )
+  \ check-imm9              \ ASM-006: TODO - signed comparison issue
   $1FF and 12 lshift swap 5 lshift or swap or $F8000C00 or ;
 
 \ LDR Xt, [Xn], #imm9  (post-index, 64-bit)
 : arm-ldr-post ( rt rn imm9 -- insn )
+  \ check-imm9              \ ASM-006: TODO - signed comparison issue
   $1FF and 12 lshift swap 5 lshift or swap or $F8400400 or ;
 
 \ LDR Xt, [Xn, #imm12*8]  (unsigned offset, 64-bit, scaled by 8)
@@ -136,10 +157,12 @@ variable code-pos   0 code-pos !
 
 \ LDRB Wt, [Xn], #imm9  (post-index, byte)
 : arm-ldrb-post ( rt rn imm9 -- insn )
+  \ check-imm9              \ ASM-006: TODO - signed comparison issue
   $1FF and 12 lshift swap 5 lshift or swap or $38400400 or ;
 
 \ STRB Wt, [Xn], #imm9  (post-index, byte)
 : arm-strb-post ( rt rn imm9 -- insn )
+  \ check-imm9              \ ASM-006: TODO - signed comparison issue
   $1FF and 12 lshift swap 5 lshift or swap or $38000400 or ;
 
 \ ============================================================
@@ -194,6 +217,11 @@ variable code-pos   0 code-pos !
 \ NEG Xd, Xm = SUB Xd, XZR, Xm
 : arm-neg ( rd rm -- insn )
   16 lshift swap or 31 5 lshift or $CB000000 or ;
+
+\ CSEL Xd, Xn, Xm, cond - conditional select
+\ Select Xn if cond is true, else Xm
+: arm-csel ( rd rn rm cond -- insn )
+  12 lshift swap 16 lshift or swap 5 lshift or swap or $9A800000 or ;
 
 \ ASR Xd, Xn, #imm6 (arithmetic shift right immediate)
 : arm-asr-imm ( rd rn imm6 -- insn )

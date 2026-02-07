@@ -11,7 +11,7 @@
 \ INPUT BUFFER
 \ ============================================================
 
-153600 constant INPUT-SIZE
+262144 constant INPUT-SIZE   \ 256KB (was 150KB - CMP-001 fix)
 create input-buf INPUT-SIZE allot
 variable input-pos   0 input-pos !
 variable input-len   0 input-len !
@@ -131,7 +131,8 @@ variable parse-addr   \ temp storage for parsing
 
 \ Each entry: 16 bytes name (padded), 8 bytes code-addr
 24 constant DICT-ENTRY-SIZE
-create dict-buf 256 DICT-ENTRY-SIZE * allot
+256 constant DICT-MAX-ENTRIES   \ CMP-002: max dictionary entries
+create dict-buf DICT-MAX-ENTRIES DICT-ENTRY-SIZE * allot
 variable dict-count  0 dict-count !
 variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops)
 
@@ -139,6 +140,14 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
 
 : dict-add ( addr u code-addr -- )
   \ Add word to dictionary
+  \ CMP-002 fix: check dictionary overflow
+  dict-count @ DICT-MAX-ENTRIES < 0= if
+    ." ERROR: Dictionary full (max " DICT-MAX-ENTRIES . ." entries)" cr abort
+  then
+  \ CMP-004 fix: warn if name truncated
+  over 16 > if
+    ." WARNING: Name truncated to 16 chars: " 2 pick 16 type cr
+  then
   dict-count @ dict-entry      \ get entry address
   dup 16 0 fill                \ clear name area
   >r                           \ save entry addr
@@ -178,13 +187,18 @@ variable entry-var   \ temp storage for dict-name= (can't use >r in nested loops
 \ ============================================================
 \ Each pending ref: 16 bytes name (padded), 8 bytes call-site (code offset)
 24 constant PEND-ENTRY-SIZE
-create pend-buf 256 PEND-ENTRY-SIZE * allot
+256 constant PEND-MAX-ENTRIES   \ CMP-003: max forward references
+create pend-buf PEND-MAX-ENTRIES PEND-ENTRY-SIZE * allot
 variable pend-count  0 pend-count !
 
 : pend-entry ( n -- addr ) PEND-ENTRY-SIZE * pend-buf + ;
 
 : add-pending ( addr u call-site -- )
   \ Record a forward reference: name at addr/u, BL at call-site
+  \ CMP-003 fix: check overflow
+  pend-count @ PEND-MAX-ENTRIES < 0= if
+    ." ERROR: Forward refs full (max " PEND-MAX-ENTRIES . ." )" cr abort
+  then
   pend-count @ pend-entry    \ get entry address
   dup 16 0 fill              \ clear name area
   >r
@@ -303,6 +317,8 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2dup s" invert" str= if 2drop emit-invert true exit then
   2dup s" negate" str= if 2drop emit-negate true exit then
   2dup s" abs" str= if 2drop emit-abs true exit then
+  2dup s" min" str= if 2drop emit-min true exit then
+  2dup s" max" str= if 2drop emit-max true exit then
   2dup s" lshift" str= if 2drop emit-lshift true exit then
   2dup s" rshift" str= if 2drop emit-rshift true exit then
   2dup s" 1+" str= if 2drop emit-1+ true exit then
@@ -321,7 +337,11 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2dup s" tuck" str= if 2drop emit-tuck true exit then
   2dup s" 2dup" str= if 2drop emit-2dup true exit then
   2dup s" 2drop" str= if 2drop emit-2drop true exit then
+  2dup s" 2swap" str= if 2drop emit-2swap true exit then
+  2dup s" 2over" str= if 2drop emit-2over true exit then
   2dup s" -rot" str= if 2drop emit--rot true exit then
+  2dup s" ?dup" str= if 2drop emit-?dup true exit then
+  2dup s" pick" str= if 2drop emit-pick true exit then
   2dup s" >r" str= if 2drop emit->r true exit then
   2dup s" r>" str= if 2drop emit-r> true exit then
   2dup s" r@" str= if 2drop emit-r@ true exit then
@@ -367,7 +387,7 @@ variable var-next   8 var-next !    \ next offset (8 = skip here pointer at offs
   2drop false ;
 
 \ String literals
-256 constant STR-BUF-SIZE
+1024 constant STR-BUF-SIZE   \ (was 256 - CMP-007 fix)
 create str-temp STR-BUF-SIZE allot    \ temp buffer for parsing strings
 variable str-len                       \ length of parsed string
 
@@ -504,7 +524,8 @@ variable str-len                       \ length of parsed string
   get-token                    \ get word name
   2dup s" main" str= if
     \ Main word - record entry point for Mach-O, emit prologue
-    2drop code-here main-entry ! var-next @ gen-prologue
+    2drop code-here main-entry ! true main-defined? !  \ MCH-004: mark main as defined
+    var-next @ gen-prologue
     true in-main? !            \ EXIT in main should exit program
     begin
       get-token

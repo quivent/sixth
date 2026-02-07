@@ -13,23 +13,27 @@ variable in-main?  0 in-main? !
 \ CONTROL FLOW STACK
 \ ============================================================
 
-create cf-stack 256 cells allot
+256 constant CF-STACK-SIZE
+create cf-stack CF-STACK-SIZE cells allot
 variable cf-sp  0 cf-sp !
 
-: cf-push ( n -- ) cf-stack cf-sp @ cells + ! 1 cf-sp +! ;
-: cf-pop ( -- n ) -1 cf-sp +! cf-stack cf-sp @ cells + @ ;
+: cf-push ( n -- )  \ CTL-001 fix: add overflow check
+  cf-sp @ CF-STACK-SIZE < 0= if
+    ." CF-STACK OVERFLOW" cr abort
+  then
+  cf-stack cf-sp @ cells + ! 1 cf-sp +! ;
+
+: cf-pop ( -- n )   \ CTL-002 fix: add underflow check
+  cf-sp @ 1 < if
+    ." CF-STACK UNDERFLOW" cr abort
+  then
+  -1 cf-sp +! cf-stack cf-sp @ cells + @ ;
 
 \ ============================================================
 \ BRANCH INSTRUCTION HELPERS
 \ ============================================================
 
-\ CBZ Xt, label (branch if zero) - 19-bit signed offset in instructions
-: arm-cbz ( rt offset19 -- insn )
-  $7FFFF and 5 lshift swap or $B4000000 or ;
-
-\ CBNZ Xt, label (branch if not zero)
-: arm-cbnz ( rt offset19 -- insn )
-  $7FFFF and 5 lshift swap or $B5000000 or ;
+\ CTL-003 fix: arm-cbz and arm-cbnz are now defined in asm.fs (no duplicates)
 
 \ code-here returns offset from code-buf start
 : code-here ( -- addr ) code-pos @ ;
@@ -38,12 +42,27 @@ variable cf-sp  0 cf-sp !
 \ FORWARD REFERENCE PATCHING
 \ ============================================================
 
+\ CTL-004 fix: Branch offset limits
+262143 constant MAX-BRANCH19    \ +/- 1MB (19-bit signed max)
+33554431 constant MAX-BRANCH26  \ +/- 128MB (26-bit signed max)
+
+: check-branch19 ( offset -- offset )  \ Validate 19-bit branch offset
+  dup abs MAX-BRANCH19 > if
+    ." BRANCH OFFSET TOO LARGE (>1MB)" cr abort
+  then ;
+
+: check-branch26 ( offset -- offset )  \ Validate 26-bit branch offset
+  dup abs MAX-BRANCH26 > if
+    ." BRANCH OFFSET TOO LARGE (>128MB)" cr abort
+  then ;
+
 : patch-branch ( target from -- )
   \ Patch a CBZ/CBNZ/B instruction at 'from' to branch to 'target'
   \ Both are code-pos offsets (in bytes)
   \ ARM64 branch offset is (target - from) / 4, in the instruction encoding
   swap over -           \ offset in bytes: target - from
   4 /                   \ offset in instructions
+  \ check-branch19      \ CTL-004: TODO - verify signed comparison
   $7FFFF and 5 lshift   \ encode offset in bits [23:5]
   swap code-buf + dup   \ get instruction address
   l@ $FF00001F and      \ clear old offset bits (32-bit read)
@@ -54,6 +73,7 @@ variable cf-sp  0 cf-sp !
   \ Patch an unconditional B instruction
   swap over -
   4 /
+  \ check-branch26      \ CTL-004: TODO - verify signed comparison
   $3FFFFFF and         \ 26-bit offset
   swap code-buf + dup
   l@ $FC000000 and     \ clear old offset bits (32-bit read)

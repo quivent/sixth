@@ -47,6 +47,18 @@
   19 0 arm-cmp-imm emit32            \ CMP X19, #0
   $DA93A673 emit32 ;                 \ CNEG X19, X19, LT (X19 = -X19 if negative)
 
+\ MIN - minimum of two values
+: emit-min ( -- )  \ ( a b -- min )
+  pop-nos                            \ X9 = a (NOS), X19 = b (TOS)
+  9 19 arm-cmp-reg emit32            \ CMP X9, X19 (a vs b)
+  19 9 19 11 arm-csel emit32 ;       \ CSEL X19, X9, X19, LT (if a<b then a else b)
+
+\ MAX - maximum of two values
+: emit-max ( -- )  \ ( a b -- max )
+  pop-nos                            \ X9 = a (NOS), X19 = b (TOS)
+  9 19 arm-cmp-reg emit32            \ CMP X9, X19 (a vs b)
+  19 9 19 12 arm-csel emit32 ;       \ CSEL X19, X9, X19, GT (if a>b then a else b)
+
 \ ============================================================
 \ COMPARISON
 \ ============================================================
@@ -220,9 +232,9 @@
   code-pos @ over - 4 /               \ offset from CBZ to done
   12 swap arm-cbz swap patch32
 
-  \ Patch B to here
+  \ Patch B (unconditional branch) to here
   code-pos @ over - 4 /               \ offset from B to done
-  swap code-buf + dup l@ $FC000000 and rot $3FFFFFF and or swap l! ;      \ patch CBZ
+  swap code-buf + dup l@ $FC000000 and rot $3FFFFFF and or swap l! ;      \ PRM-005 fix: patch B (not CBZ)
 
 : emit-fill ( -- )  \ ( addr u c -- ) fill u bytes at addr with c
   \ Stack: TOS=c, NOS=u, 3rd=addr

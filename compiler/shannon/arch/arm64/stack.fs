@@ -25,6 +25,14 @@
 : emit-drop ( -- )  \ Pop memory stack into TOS (discard old TOS)
   19 22 8 arm-ldr-post emit32 ;
 
+\ Helper: store 32-bit value at code-buf + offset (for patching instructions)
+: patch32 ( u32 offset -- )
+  code-buf + >r
+  dup $FF and r@ c!
+  8 rshift dup $FF and r@ 1+ c!
+  8 rshift dup $FF and r@ 2 + c!
+  8 rshift $FF and r> 3 + c! ;
+
 \ ============================================================
 \ LITERAL LOADING
 \ ============================================================
@@ -42,11 +50,23 @@
 \ PROLOGUE / EPILOGUE
 \ ============================================================
 
+\ STK-001: Maximum here-offset (32-bit gives us plenty of room)
+$FFFFFFFF constant MAX-HERE-OFFSET
+
+: check-here-offset ( offset -- offset )  \ STK-001: validate here-offset
+  dup 0< if
+    ." HERE-OFFSET NEGATIVE" cr abort
+  then
+  dup MAX-HERE-OFFSET > if
+    ." HERE-OFFSET TOO LARGE" cr abort
+  then ;
+
 \ Entry: set up data stack pointer, return stack pointer, variable base, and here
 \ Memory layout:
 \   [X20 + 0] = here pointer (initialized to X20 + here-offset)
 \   [X20 + 8 ...] = variable storage, then here-allocated data
 : gen-prologue ( here-offset -- )
+  \ check-here-offset             \ STK-001: TODO - need to verify comparison
   22 31 2048 arm-sub-imm emit32     \ SUB X22, SP, #2048 (data stack: 2KB)
   28 31 3072 arm-sub-imm emit32     \ SUB X28, SP, #3072 (return stack: 1KB)
   \ X20 = X28 - 4096 (4KB for here/allot, using X28 as base since SP encoding is tricky)
@@ -137,6 +157,42 @@
   19 22 1 arm-str-off emit32         \ [X22+8] = z (old TOS)
   10 22 0 arm-str-off emit32         \ [X22] = x
   19 9 arm-mov-reg emit32 ;          \ TOS = y
+
+: emit-?dup ( -- )  \ ( x -- 0 | x x ) duplicate TOS if non-zero
+  code-pos @                         \ save CBZ position
+  19 0 arm-cbz emit32                \ CBZ X19, skip (placeholder)
+  push-tos                           \ duplicate if non-zero
+  code-pos @ over - 4 /              \ offset from CBZ to here
+  19 swap arm-cbz swap patch32 ;     \ patch CBZ
+
+: emit-pick ( -- )  \ ( xu ... x0 u -- xu ... x0 xu ) copy u-th stack item
+  \ TOS (X19) = u (index)
+  \ LSL X19, X19, #3 (multiply by 8)
+  $D37DF273 emit32                   \ LSL X19, X19, #3
+  \ ADD X19, X22, X19 (compute address)
+  19 22 19 arm-add-reg emit32
+  \ LDR X19, [X19] (load the value)
+  19 19 0 arm-ldr-off emit32 ;
+
+: emit-2swap ( -- )  \ ( x1 x2 x3 x4 -- x3 x4 x1 x2 ) swap top two pairs
+  \ Stack: TOS=x4, [X22]=x3, [X22+8]=x2, [X22+16]=x1
+  \ Want:  TOS=x2, [X22]=x1, [X22+8]=x4, [X22+16]=x3
+  9 22 0 arm-ldr-off emit32          \ X9 = x3 (NOS)
+  10 22 1 arm-ldr-off emit32         \ X10 = x2
+  11 22 2 arm-ldr-off emit32         \ X11 = x1
+  19 22 1 arm-str-off emit32         \ [X22+8] = x4 (old TOS)
+  9 22 2 arm-str-off emit32          \ [X22+16] = x3
+  11 22 0 arm-str-off emit32         \ [X22] = x1 (new NOS)
+  19 10 arm-mov-reg emit32 ;         \ TOS = x2
+
+: emit-2over ( -- )  \ ( x1 x2 x3 x4 -- x1 x2 x3 x4 x1 x2 ) copy second pair
+  \ Stack: TOS=x4, [X22]=x3, [X22+8]=x2, [X22+16]=x1
+  9 22 2 arm-ldr-off emit32          \ X9 = x1 (offset 2 = 16 bytes)
+  10 22 1 arm-ldr-off emit32         \ X10 = x2 (offset 1 = 8 bytes)
+  push-tos                           \ push x4
+  19 9 arm-mov-reg emit32            \ TOS = x1
+  push-tos                           \ push x1
+  19 10 arm-mov-reg emit32 ;         \ TOS = x2
 
 \ ============================================================
 \ RETURN STACK OPERATIONS

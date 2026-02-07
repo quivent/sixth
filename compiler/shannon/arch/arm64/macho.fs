@@ -10,6 +10,7 @@
 \ ============================================================
 
 variable main-entry   \ code-pos where 'main' starts (set by compile-colon)
+variable main-defined? 0 main-defined? !  \ MCH-004: flag for main being defined
 
 $4000 constant PAGE-SIZE
 32 constant HEADER-SIZE
@@ -36,7 +37,7 @@ SYMTAB-OFF NLIST-SIZE + constant STRTAB-OFF
 \ FILE BUFFER
 \ ============================================================
 
-65536 constant FILE-SIZE
+262144 constant FILE-SIZE    \ 256KB (was 64KB - MCH-001/005 fix)
 create file-buf FILE-SIZE allot
 variable fpos   0 fpos !
 
@@ -210,6 +211,10 @@ variable code-sz
   code-pos @ 0 ?do code-buf i + c@ f, loop ;
 
 : build-macho ( -- )
+  \ MCH-004 fix: verify main-entry is set
+  main-defined? @ 0= if
+    ." ERROR: No 'main' word defined" cr abort
+  then
   0 fpos !
   code-pos @ code-sz !
   write-mach-header
