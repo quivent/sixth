@@ -79,8 +79,9 @@ impl AppState {
         manifest.update_from_scan(&arm64_words, &overrides, &adversarial_tests, &test_results);
         let after_total = manifest.words.len();
         let after_done = manifest.words.iter().filter(|w| w.status == crate::models::WordStatus::Done).count();
-        eprintln!("[rescan] Total words: {} (was {}, +{} new from ARM64)",
-            after_total, before_total, after_total - before_total);
+        let diff = after_total as i64 - before_total as i64;
+        eprintln!("[rescan] Total words: {} (was {}, {:+} from ARM64)",
+            after_total, before_total, diff);
         eprintln!("[rescan] Done: {}/{} ({:.0}%)",
             after_done, after_total, (after_done as f64 / after_total as f64) * 100.0);
     }
